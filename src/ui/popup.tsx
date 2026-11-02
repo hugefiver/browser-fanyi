@@ -556,6 +556,8 @@ export const PopupApp: React.FC = () => {
           } catch { setActionError('区域截图失败，请重新打开工具栏重试。'); }
           finally { setLoadingAction(false); }
         }}>框选区域截图（本地预览）</Button>
+        <Button disabled={loadingAction || isUnsupportedTab || pageStatus.completed === 0}
+          onClick={() => void handlePageCommand('review')}>编辑译文 / 学习显示</Button>
         <VideoPanel tabId={isUnsupportedTab ? null : tabId} settings={settings} />
         <SiteRulesPanel settings={settings} tab={tabId !== null && !isUnsupportedTab ? { id: tabId, url: tabUrl } : undefined} />
         <Button fullWidth variant="outlined" onClick={() => void openWorkbench()}>翻译与写作工作台</Button>

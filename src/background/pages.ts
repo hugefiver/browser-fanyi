@@ -26,7 +26,8 @@ export class PageSessions {
   private registryWrite = Promise.resolve();
   readonly initialized: Promise<void>;
 
-  constructor(private readonly api: typeof browser) {
+  constructor(private readonly api: typeof browser,
+    private readonly suppressAuto: (tabId: number, reason: 'pause' | 'restore') => Promise<void>) {
     this.initialized = this.invalidatePreviousPages();
   }
 
@@ -66,6 +67,7 @@ export class PageSessions {
 
   async command(input: PageRequest, loadSettings?: () => Promise<Reply<StoredSettings>>,
     current: () => boolean = () => true, auto?: SiteTranslationStart): Promise<Reply<PageStatus>> {
+    if (input.action === 'pause' || input.action === 'restore') await this.suppressAuto(input.tabId, input.action);
     const active = this.sessions.get(input.tabId);
     if (loadSettings || (active?.kind !== 'hover' && ['pause', 'restore'].includes(input.action))) this.stop(input.tabId);
     const revision = this.version(input.tabId);

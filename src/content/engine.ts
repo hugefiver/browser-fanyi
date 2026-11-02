@@ -2,6 +2,7 @@ import type { ContentCommand, ContentRequest, DisplayMode, Failure, Grant, PageS
 import { errorMessages, fail } from '../shared/contracts';
 import { PageText, type Piece, type TextEntry } from './dom';
 import { HoverTranslation } from './hover';
+import { TranslationReview } from './translation-review';
 
 export type ContentTransport = (request: ContentRequest) => Promise<Reply<string>>;
 const requestTimeout = 30_000;
@@ -20,7 +21,30 @@ export function createContentEngine(document: Document, request: ContentTranspor
   let scanTimer: ReturnType<typeof setTimeout> | undefined;
   let urlTimer: ReturnType<typeof setInterval> | undefined;
   const localCancels = new Set<() => void>();
-  const page = new PageText(document, scheduleScan);
+  const page = new PageText(document, () => { review.refresh(); scheduleScan(); });
+  const review = new TranslationReview(document, {
+    getEntries: () => [...page.entries.values()].filter(entry => entry.pieces.every(piece => piece.phase === 'complete'))
+      .map(entry => ({ id: entry.id, source: entry.source, serviceTranslation: entry.pieces.map(piece => piece.result).join(''),
+        translation: entry.edited ?? entry.pieces.map(piece => piece.result).join(''), edited: entry.edited !== undefined,
+        revealed: !!entry.revealed })),
+    edit: (id, text) => updateEntry(id, entry => { entry.edited = text === entry.pieces.map(piece => piece.result).join('') ? undefined : text; }),
+    reset: id => updateEntry(id, entry => { entry.edited = undefined; }),
+    reveal: (id, revealed) => updateEntry(id, entry => { entry.revealed = revealed; }),
+    learning: enabled => {
+      page.learning = enabled;
+      for (const entry of page.entries.values()) {
+        if (enabled) entry.revealed = false;
+        page.show(entry, mode);
+      }
+    },
+  });
+  function updateEntry(id: string, change: (entry: TextEntry) => void): void {
+    page.flush();
+    const entry = [...page.entries.values()].find(entry => entry.id === id);
+    if (!entry) return;
+    change(entry);
+    page.show(entry, mode);
+  }
   const hover = new HoverTranslation(document, request, node => page.eligible(node), failure => {
     phase = 'interrupted';
     error = failure;
@@ -64,6 +88,7 @@ export function createContentEngine(document: Document, request: ContentTranspor
     if (urlTimer !== undefined) clearInterval(urlTimer);
     urlTimer = undefined;
     page.clear();
+    review.close();
     page.disconnect();
   }
 
@@ -144,6 +169,7 @@ export function createContentEngine(document: Document, request: ContentTranspor
         piece.phase = 'complete';
         piece.result = reply.value;
         page.show(entry, mode);
+        review.refresh();
       } else {
         piece.phase = 'failed';
         piece.error = reply.error;
@@ -206,7 +232,9 @@ export function createContentEngine(document: Document, request: ContentTranspor
   }
 
   async function execute(command: Extract<ContentCommand, { type: 'content.command' }>): Promise<Reply<PageStatus>> {
-    if (command.action === 'restore') {
+    if (command.action === 'review') {
+      review.open();
+    } else if (command.action === 'restore') {
       if (grant || phase !== 'idle') end();
     } else if (command.action === 'mode') {
       if (command.mode) mode = command.mode;

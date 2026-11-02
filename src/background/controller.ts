@@ -34,7 +34,10 @@ export class BackgroundController {
 
   constructor(private readonly api: typeof browser, private readonly store = new SettingsStore(),
     private readonly translator = translate) {
-    this.pages = new PageSessions(api);
+    this.pages = new PageSessions(api, async (tabId, reason) => {
+      const documentId = this.documents.get(tabId);
+      if (documentId) await this.sites.pauseOrRestore(tabId, documentId, reason);
+    });
     this.sites = new SiteRuleScheduler({
       load: () => this.store.listSiteRules(),
       disableRule: async (origin) => { await this.store.changeSiteRules(rules => setSiteRuleEnabled(rules, origin, false)); },
@@ -297,11 +300,7 @@ export class BackgroundController {
         return this.pages.status(message.tabId);
       }
       case 'page.command': {
-        const documentId = this.documents.get(message.tabId);
-        if (documentId && (message.action === 'pause' || message.action === 'restore')) {
-          await this.sites.pauseOrRestore(message.tabId, documentId, message.action);
-        }
-        if (['pause', 'restore', 'mode'].includes(message.action)) return this.pages.command(message);
+        if (['pause', 'restore', 'mode', 'review'].includes(message.action)) return this.pages.command(message);
         const revision = this.revision;
         return this.pages.command(message, () => this.ready(), () => this.revision === revision && !this.updating);
       }

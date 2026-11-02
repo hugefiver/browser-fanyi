@@ -33,6 +33,18 @@ describe('integrated automatic site translation', () => {
     expect(await f.controller.handle({ type: 'page.command', tabId: 1, action: 'pause' }, ui('popup'))).toMatchObject({ ok: true });
   });
 
+  it('suppresses same-document restart when the shared sidebar page surface pauses', async () => {
+    const f = await fixture();
+    await f.store.changeSiteRules(() => [candidate()]);
+    f.onCommitted.mock.calls[0][0]({ tabId: 1, frameId: 0, url: pageUrl });
+    await vi.waitFor(() => expect(f.grant().preferences.targetLanguage).toBe('fr'));
+    expect(await f.controller.pages.command({ type: 'page.command', tabId: 1, action: 'pause' })).toMatchObject({ ok: true });
+    const issued = f.sendMessage.mock.calls.filter(([, message]) => message.type === 'content.command' && message.grant).length;
+    f.onHistoryStateUpdated.mock.calls[0][0]({ tabId: 1, frameId: 0, url: pageUrl });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.sendMessage.mock.calls.filter(([, message]) => message.type === 'content.command' && message.grant)).toHaveLength(issued);
+  });
+
   it('rejects forged origin and service binding and ordinary content management', async () => {
     const f = await fixture();
     for (const rule of [{ ...candidate(), origin: 'https://other.example' }, { ...candidate(), service: { prefix: 'https://evil.example', model: 'test' } }]) {

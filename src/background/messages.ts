@@ -36,7 +36,7 @@ export function request(value: unknown): value is UiRequest | ContentRequest {
       && value.entries.length <= 200 && value.entries.every((entry) => validGlossaryDraft(entry, false));
     case 'page.status': case 'selection.start': case 'input.start': case 'capture.start': return Number.isInteger(value.tabId);
     case 'page.command': return Number.isInteger(value.tabId)
-      && ['start', 'pause', 'resume', 'retry', 'restore', 'mode'].includes(String(value.action))
+      && ['start', 'pause', 'resume', 'retry', 'restore', 'mode', 'review'].includes(String(value.action))
       && (value.mode === undefined || value.mode === 'bilingual' || value.mode === 'translation')
       && (value.action !== 'mode' || value.mode !== undefined);
     case 'video.list': return Number.isInteger(value.tabId);

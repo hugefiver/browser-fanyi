@@ -14,7 +14,7 @@ export interface PageStatus {
   phase: PagePhase; mode: DisplayMode; total: number; completed: number; failed: number; pending: number; hoverEnabled: boolean; error?: Failure;
 }
 export const idleStatus = (): PageStatus => ({ phase: 'idle', mode: 'bilingual', total: 0, completed: 0, failed: 0, pending: 0, hoverEnabled: false });
-export type PageAction = 'start' | 'pause' | 'resume' | 'retry' | 'restore' | 'mode';
+export type PageAction = 'start' | 'pause' | 'resume' | 'retry' | 'restore' | 'mode' | 'review';
 export interface Grant { sessionId: string; preferences: Preferences }
 export interface SelectionState { id: string; source: string; phase: 'running' | 'complete' | 'failed'; text?: string; error?: Failure }
 export type UiRequest =

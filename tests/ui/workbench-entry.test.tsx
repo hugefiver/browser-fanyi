@@ -17,7 +17,7 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ id: 22 });
   mocks.sidebarOpen.mockResolvedValue(undefined);
   mocks.sendMessage.mockImplementation(async (message: { type: string }) => ({ ok: true, value: message.type === 'settings.get'
-    ? { ...defaultPreferences, prefix: '', model: '', authorized: false, hasKey: false } : idleStatus() }));
+    ? { ...defaultPreferences, prefix: '', model: '', authorized: false, hasKey: false } : message.type === 'sites.list' ? [] : idleStatus() }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -25,7 +25,7 @@ it('opens local workbench without requiring a service or sending content', async
   await act(async () => { render(<PopupApp />); });
   fireEvent.click(screen.getByRole('button', { name: '翻译与写作工作台' }));
   expect(mocks.create).toHaveBeenCalledWith({ url: 'chrome-extension://test/workbench.html' });
-  expect(mocks.sendMessage.mock.calls.every(([message]) => ['settings.get', 'page.status'].includes(message.type))).toBe(true);
+  expect(mocks.sendMessage.mock.calls.every(([message]) => ['settings.get', 'page.status', 'sites.list'].includes(message.type))).toBe(true);
 });
 
 it('invokes Chromium sidePanel synchronously from the click using cached window identity', async () => {

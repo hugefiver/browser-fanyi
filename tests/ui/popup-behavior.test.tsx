@@ -49,6 +49,7 @@ describe('PopupApp component behavior', () => {
 
     mockSendMessage.mockImplementation((msg: unknown) => {
       const typed = msg as { type?: string };
+      if (typed.type === 'sites.list') return Promise.resolve({ ok: true, value: [] });
       if (typed.type === 'settings.get') {
         return Promise.resolve({ ok: true, value: keylessSettings });
       }
@@ -96,6 +97,7 @@ describe('PopupApp component behavior', () => {
 
     mockSendMessage.mockImplementation((msg: unknown) => {
       const typed = msg as { type?: string };
+      if (typed.type === 'sites.list') return Promise.resolve({ ok: true, value: [] });
       if (typed.type === 'settings.get') {
         return Promise.resolve({ ok: true, value: unconfiguredSettings });
       }
@@ -142,6 +144,7 @@ describe('PopupApp component behavior', () => {
 
     mockSendMessage.mockImplementation((msg: unknown) => {
       const typed = msg as { type?: string };
+      if (typed.type === 'sites.list') return Promise.resolve({ ok: true, value: [] });
       if (typed.type === 'settings.get') {
         return Promise.resolve({ ok: true, value: configuredSettings });
       }
@@ -176,6 +179,7 @@ describe('PopupApp component behavior', () => {
     let status = idleStatus();
     mockSendMessage.mockImplementation((message: unknown) => {
       const typed = message as { type?: string; enabled?: boolean };
+      if (typed.type === 'sites.list') return Promise.resolve({ ok: true, value: [] });
       if (typed.type === 'settings.get') return Promise.resolve({ ok: true, value: settings });
       if (typed.type === 'page.status') return Promise.resolve({ ok: true, value: status });
       if (typed.type === 'hover.command') {

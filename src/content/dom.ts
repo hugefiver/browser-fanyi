@@ -7,6 +7,9 @@ export interface Piece {
   error?: Failure;
 }
 export interface TextEntry {
+  id: string;
+  edited?: string;
+  revealed?: boolean;
   node: Text;
   source: string;
   lastWritten?: string;
@@ -18,6 +21,7 @@ const excluded = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA',
 
 export class PageText {
   readonly entries = new Map<Text, TextEntry>();
+  learning = false;
   private readonly observer: MutationObserver;
   private observing = false;
   private scanVersion = 0;
@@ -69,7 +73,7 @@ export class PageText {
           const source = characters.slice(offset, offset + 2000).join('');
           pieces.push(source.trim() ? { source, phase: 'pending' } : { source, phase: 'complete', result: source });
         }
-        this.entries.set(node, { node, source: node.data, pieces });
+        this.entries.set(node, { id: crypto.randomUUID(), node, source: node.data, pieces });
       }
       if (++visited % 100 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
     }
@@ -78,13 +82,14 @@ export class PageText {
   show(entry: TextEntry, mode: DisplayMode): void {
     this.flush();
     if (!this.entries.has(entry.node) || !this.eligible(entry.node) || entry.pieces.some(piece => piece.phase !== 'complete')) return;
-    const text = entry.pieces.map(piece => piece.result).join('');
+    const text = entry.edited ?? entry.pieces.map(piece => piece.result).join('');
     this.write(() => {
       if (entry.lastWritten !== undefined && entry.node.data === entry.lastWritten) entry.node.data = entry.source;
       entry.lastWritten = undefined;
       entry.translation?.remove();
       entry.translation = undefined;
-      if (mode === 'translation') {
+      if (this.learning && !entry.revealed) return;
+      if (mode === 'translation' && !this.learning) {
         entry.node.data = text;
         entry.lastWritten = text;
       } else {
@@ -128,6 +133,12 @@ export class PageText {
   }
 
   private process(records: MutationRecord[]): void {
+    const ownedUi = (node: Node) => {
+      const element = node.nodeType === 1 ? node as Element : node.parentElement;
+      return !!element?.closest(`[${marker}]:not([${marker}="translation"])`);
+    };
+    records = records.filter(record => !ownedUi(record.target)
+      && !(record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every(ownedUi)));
     if (!records.length) return;
     const changedText = new Set(records.filter(record => record.type === 'characterData').map(record => record.target));
     for (const entry of this.entries.values()) {
