@@ -8,6 +8,8 @@ import { PageSessions } from './pages';
 import { RequestPool, translate } from './provider';
 import { Selections } from './selections';
 import { SettingsStore, type StoredSettings, type TranslationSnapshot } from './settings';
+import { Subtitles } from './subtitles';
+import type { SubtitlesContext } from '../shared/subtitles';
 
 const interrupted: Failure = { code: 'interrupted', message: errorMessages.interrupted };
 const permission: Failure = { code: 'permission', message: errorMessages.permission };
@@ -15,8 +17,10 @@ const permission: Failure = { code: 'permission', message: errorMessages.permiss
 export class BackgroundController {
   readonly pages: PageSessions;
   readonly selections: Selections;
+  readonly subtitles: Subtitles;
   private pool = new RequestPool();
   private controllers = new Set<AbortController>();
+  private readonly contextBase = crypto.randomUUID();
   private revision = 0;
   private updating = 0;
 
@@ -24,6 +28,8 @@ export class BackgroundController {
     private readonly translator = translate) {
     this.pages = new PageSessions(api);
     this.selections = new Selections(api, () => this.ready(), (settings, text, signal) => this.send(settings, text, signal));
+    this.subtitles = new Subtitles(api, () => this.ready(),
+      (settings, text, signal) => this.send(settings, text, signal), () => this.subtitleContext());
   }
 
   private async ready(): Promise<Reply<TranslationSnapshot>> {
@@ -71,11 +77,20 @@ export class BackgroundController {
     return this.store.publicSettings((origin) => this.api.permissions.contains({ origins: [origin] }));
   }
 
+  private async subtitleContext(): Promise<SubtitlesContext> {
+    for (;;) {
+      const revision = this.revision;
+      const settings = await this.publicSettings();
+      if (revision === this.revision) return { contextId: `${this.contextBase}:${revision}`, settings };
+    }
+  }
+
   invalidate(error: Failure): void {
     this.revision++;
     this.pages.invalidateAll(error);
     this.selections.invalidate();
     this.controllers.forEach((controller) => controller.abort());
+    void this.subtitles.contextChanged();
   }
 
   async handle(message: unknown, sender: Runtime.MessageSender): Promise<unknown> {
@@ -188,6 +203,7 @@ export class BackgroundController {
   }
 
   install(): void {
+    this.subtitles.install();
     this.api.runtime.onMessage.addListener((message: unknown, sender: Runtime.MessageSender) => this.handle(message, sender));
     this.api.permissions.onRemoved.addListener(() => this.invalidate(permission));
     const navigate = (details: { tabId: number; frameId: number }) => {

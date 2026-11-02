@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BackgroundController } from '../../src/background/controller';
 import type browser from '../../src/shared/browser';
 import { defaultPreferences, fail, idleStatus, type Reply } from '../../src/shared/contracts';
@@ -199,6 +199,21 @@ describe('message and grant boundaries', () => {
     expect(ctx.sendMessage).toHaveBeenCalledWith(1, { type: 'content.invalidate', error: expect.objectContaining({ code: 'interrupted' }) }, { frameId: 0 });
     expect(await ctx.controller.handle({ type: 'settings.clear', all: true }, ui('options')))
       .toMatchObject({ ok: true, value: { prefix: '', model: '', hasKey: false, authorized: false } });
+  });
+
+  it('installs the subtitle port and propagates permission and data invalidations', async () => {
+    const ctx = await fixture();
+    expect(ctx.onConnect).toHaveBeenCalledTimes(1);
+    const contextChanged = vi.spyOn(ctx.controller.subtitles, 'contextChanged').mockResolvedValue();
+
+    const removed = ctx.permissionsRemoved.mock.calls[0][0] as () => void;
+    removed();
+    expect(contextChanged).toHaveBeenCalledTimes(1);
+
+    await ctx.controller.handle({ type: 'glossary.upsert', entry: {
+      source: 'source', target: '术语', targetLanguage: 'zh-CN',
+    } }, ui('options'));
+    expect(contextChanged).toHaveBeenCalledTimes(3);
   });
 
   it('loses grants on background restart instead of silently resending', async () => {

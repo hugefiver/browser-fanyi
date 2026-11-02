@@ -19,6 +19,7 @@ export async function fixture() {
     return { ok: true, value: { ...idleStatus(), phase: 'running' } };
   });
   const onMessage = vi.fn();
+  const onConnect = vi.fn();
   const onCommitted = vi.fn();
   const onHistoryStateUpdated = vi.fn();
   const onReferenceFragmentUpdated = vi.fn();
@@ -33,7 +34,8 @@ export async function fixture() {
       remove: vi.fn(async (key: string) => { delete sessionValues[key]; }),
     } },
     runtime: { id: 'clean-room', getURL: (path: string) => `chrome-extension://clean-room/${path}`,
-      onMessage: { addListener: onMessage }, onInstalled: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() },
+      onMessage: { addListener: onMessage }, onConnect: { addListener: onConnect },
+      onInstalled: { addListener: vi.fn() }, onStartup: { addListener: vi.fn() },
       openOptionsPage: vi.fn(async (): Promise<void> => undefined) },
     permissions: { contains: vi.fn(async () => true), onRemoved: { addListener: permissionsRemoved } },
     tabs: { query: vi.fn(async () => [{ id: 1, url: pageUrl }]), get: vi.fn(async () => ({ id: 1, url: pageUrl })),
@@ -61,6 +63,6 @@ export async function fixture() {
     await controller.handle({ type: 'page.command', tabId: 1, action: 'start' }, ui('popup'));
     return grant();
   };
-  return { api, store, controller, translator, sendMessage, grant, start, onMessage, onCommitted,
+  return { api, store, controller, translator, sendMessage, grant, start, onMessage, onConnect, onCommitted,
     onHistoryStateUpdated, onReferenceFragmentUpdated, onRemoved, permissionsRemoved, menuClicked };
 }

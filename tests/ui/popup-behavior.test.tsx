@@ -5,6 +5,7 @@ import { PopupApp } from '../../src/ui/popup';
 import { PublicSettings, PageStatus, idleStatus } from '../../src/shared/contracts';
 
 const mockTabsQuery = vi.fn();
+const mockTabsCreate = vi.fn();
 const mockSendMessage = vi.fn();
 const mockOpenOptionsPage = vi.fn();
 const mockGetURL = vi.fn((path: string) => `chrome-extension://mock-id/${path}`);
@@ -13,6 +14,7 @@ vi.mock('../../src/shared/browser', () => ({
   default: {
     tabs: {
       query: (...args: unknown[]) => mockTabsQuery(...args),
+      create: (...args: unknown[]) => mockTabsCreate(...args),
     },
     runtime: {
       sendMessage: (...args: unknown[]) => mockSendMessage(...args),
@@ -29,6 +31,7 @@ describe('PopupApp component behavior', () => {
     mockTabsQuery.mockResolvedValue([
       { id: 1, url: 'https://example.com/article' },
     ]);
+    mockTabsCreate.mockResolvedValue({ id: 2 });
   });
 
   it('enables start and selection buttons when prefix + model + authorized=true even with hasKey=false', async () => {
@@ -75,6 +78,9 @@ describe('PopupApp component behavior', () => {
     const selectionButton = screen.getByRole('button', { name: '选区翻译（在新标签页打开）' });
     expect(selectionButton).not.toBeNull();
     expect(selectionButton.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'SRT 字幕翻译（在新标签页打开）' }));
+    expect(mockTabsCreate).toHaveBeenCalledWith({ url: 'chrome-extension://mock-id/subtitles.html' });
   });
 
   it('disables start button when unconfigured or unauthorized', async () => {

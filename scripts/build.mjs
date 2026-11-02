@@ -21,7 +21,12 @@ for (const platform of ['chromium', 'firefox']) {
     configFile: false, root, base: './', publicDir: false,
     build: { outDir, emptyOutDir: true, target: 'es2022',
       rollupOptions: {
-        input: { popup: resolve(root, 'popup.html'), options: resolve(root, 'options.html'), selection: resolve(root, 'selection.html') },
+        input: {
+          popup: resolve(root, 'popup.html'),
+          options: resolve(root, 'options.html'),
+          selection: resolve(root, 'selection.html'),
+          subtitles: resolve(root, 'subtitles.html'),
+        },
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.message.includes('"use client"')) return;
           warn(warning);

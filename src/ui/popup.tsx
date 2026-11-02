@@ -189,6 +189,15 @@ export const PopupApp: React.FC = () => {
     }
   };
 
+  const handleOpenSubtitles = async () => {
+    setActionError(null);
+    try {
+      await browser.tabs.create({ url: browser.runtime.getURL('subtitles.html') });
+    } catch {
+      setActionError('无法打开 SRT 字幕翻译页面。');
+    }
+  };
+
   const isConfigured = Boolean(
     settings && settings.prefix.trim() && settings.model.trim()
   );
@@ -492,6 +501,17 @@ export const PopupApp: React.FC = () => {
           size="small"
         >
           选区翻译（在新标签页打开）
+        </Button>
+
+        <Divider sx={{ my: 0.5 }} />
+
+        <Button
+          fullWidth
+          variant="outlined"
+          onClick={() => void handleOpenSubtitles()}
+          size="small"
+        >
+          SRT 字幕翻译（在新标签页打开）
         </Button>
       </Stack>
     </Box>
