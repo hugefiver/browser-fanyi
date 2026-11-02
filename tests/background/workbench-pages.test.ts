@@ -63,8 +63,7 @@ describe('native sidebar current-page ownership', () => {
     connection.receive({ type: 'page.command', id: 'start', contextId, tabId: 1, action: 'start' });
     await vi.waitFor(() => expect(connection.posted.some(message => message.type === 'page' && message.id === 'start')).toBe(true));
     const first = ctx.grant();
-    const activate = ctx.api.tabs.onActivated.addListener.mock.calls[0][0] as (info: { tabId: number }) => void;
-    activate({ tabId: 2 });
+    for (const [activate] of ctx.api.tabs.onActivated.addListener.mock.calls) activate({ tabId: 2 });
     expect(await ctx.controller.handle({ type: 'content.translate', sessionId: first.sessionId, text: 'stale' }, content())).toEqual(fail('interrupted'));
     await ctx.controller.handle({ type: 'page.command', tabId: 1, action: 'start' }, ui('popup'));
     const latest = ctx.grant();

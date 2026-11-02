@@ -34,7 +34,7 @@ export function request(value: unknown): value is UiRequest | ContentRequest {
     case 'glossary.delete': return typeof value.id === 'string';
     case 'glossary.import': return Array.isArray(value.entries) && value.entries.length > 0
       && value.entries.length <= 200 && value.entries.every((entry) => validGlossaryDraft(entry, false));
-    case 'page.status': case 'selection.start': case 'input.start': return Number.isInteger(value.tabId);
+    case 'page.status': case 'selection.start': case 'input.start': case 'capture.start': return Number.isInteger(value.tabId);
     case 'page.command': return Number.isInteger(value.tabId)
       && ['start', 'pause', 'resume', 'retry', 'restore', 'mode'].includes(String(value.action))
       && (value.mode === undefined || value.mode === 'bilingual' || value.mode === 'translation')
@@ -68,6 +68,6 @@ export function uiPage(sender: Runtime.MessageSender, extensionUrl: string, exte
 export function allowed(page: UiPage, type: UiRequest['type'] | ContentRequest['type']): boolean {
   if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test',
     'glossary.list', 'glossary.upsert', 'glossary.delete', 'glossary.import', 'sites.list', 'sites.change'].includes(type);
-  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start', 'sites.list', 'sites.save', 'sites.change'].includes(type);
+  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start', 'capture.start', 'sites.list', 'sites.save', 'sites.change'].includes(type);
   return ['selection.get', 'selection.retry', 'selection.close'].includes(type);
 }

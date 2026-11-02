@@ -545,6 +545,16 @@ export const PopupApp: React.FC = () => {
         >
           SRT 字幕翻译（在新标签页打开）
         </Button>
+        <Typography variant="caption">区域截图先由浏览器在本机抓取整张可见页，再裁剪。仅裁剪区进入工作台，确认前不上传。</Typography>
+        <Button disabled={loadingAction || isUnsupportedTab || tabId === null} onClick={async () => {
+          setActionError(null);
+          setLoadingAction(true);
+          try {
+            const reply = await browser.runtime.sendMessage({ type: 'capture.start', tabId }) as Reply<null>;
+            if (!reply.ok) setActionError(reply.error.message);
+          } catch { setActionError('区域截图失败，请重新打开工具栏重试。'); }
+          finally { setLoadingAction(false); }
+        }}>框选区域截图（本地预览）</Button>
         <SiteRulesPanel settings={settings} tab={tabId !== null && !isUnsupportedTab ? { id: tabId, url: tabUrl } : undefined} />
         <Button fullWidth variant="outlined" onClick={() => void openWorkbench()}>翻译与写作工作台</Button>
         <Button fullWidth variant="outlined" onClick={openSidebar}>打开原生侧栏</Button>

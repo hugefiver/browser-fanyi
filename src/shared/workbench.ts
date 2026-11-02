@@ -10,13 +10,14 @@ export const operationLabels: Record<WritingOperation, string> = {
 export interface WorkbenchContext { contextId: string; settings: PublicSettings }
 export type WorkbenchClientMessage =
   | { type: 'translate'; id: string; contextId: string; text: string; operation: WritingOperation }
+  | { type: 'image'; id: string; contextId: string; dataUrl: string }
   | { type: 'cancel'; id: string }
   | { type: 'apply'; id: string; contextId: string; text: string }
   | { type: 'restore'; id: string; contextId: string }
   | { type: 'page.status'; id: string; contextId: string }
   | { type: 'page.command'; id: string; contextId: string; tabId: number; action: 'start' | 'pause' | 'restore' };
 export type WorkbenchServerMessage =
-  | { type: 'hello'; context: WorkbenchContext; capture?: InputAssistCapture }
+  | { type: 'hello'; context: WorkbenchContext; capture?: InputAssistCapture; image?: string }
   | { type: 'invalidated'; context: WorkbenchContext }
   | { type: 'result'; id: string; contextId: string; reply: Reply<string> }
   | { type: 'input-result'; id: string; contextId: string; reply: InputAssistResult }
@@ -36,6 +37,8 @@ export function workbenchMessage(value: unknown): value is WorkbenchClientMessag
   if (message.type === 'restore' || message.type === 'page.status') return true;
   if (message.type === 'page.command') return Number.isSafeInteger(message.tabId)
     && ['start', 'pause', 'restore'].includes(String(message.action));
+  if (message.type === 'image') return typeof message.dataUrl === 'string'
+    && message.dataUrl.length <= 5_592_440 && /^data:image\/(png|jpeg|webp);base64,/.test(message.dataUrl);
   if (typeof message.text !== 'string') return false;
   if (message.type === 'apply') return Array.from(message.text).length <= 20_000;
   return message.type === 'translate' && writingOperations.includes(message.operation as WritingOperation)

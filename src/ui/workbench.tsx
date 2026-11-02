@@ -7,6 +7,7 @@ import type { InputAssistCapture } from '../content/input-assist';
 import { fail, type PageStatus, type Reply } from '../shared/contracts';
 import { inputFailureText, operationLabels, WORKBENCH_PORT_NAME, writingOperations, type WorkbenchContext, type WorkbenchServerMessage, type WritingOperation } from '../shared/workbench';
 import { DocumentsPanel } from './documents';
+import { ImagesPanel, type ImageRecognition } from './images';
 import { md2Theme } from './theme';
 
 const pagePhases: Record<PageStatus['phase'], string> = {
@@ -19,6 +20,7 @@ type Translate = (text: string, signal: AbortSignal, operation?: WritingOperatio
 export function WorkbenchApp(): React.ReactElement {
   const [context, setContext] = useState<WorkbenchContext>();
   const [capture, setCapture] = useState<InputAssistCapture>();
+  const [image, setImage] = useState<string>();
   const [bindingValid, setBindingValid] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const [tab, setTab] = useState('text');
@@ -61,6 +63,8 @@ export function WorkbenchApp(): React.ReactElement {
         setContext(message.context);
         if (message.type === 'hello') {
           setCapture(message.capture);
+          setImage(message.image);
+          if (message.image) setTab('images');
           setBindingValid(!!message.capture);
           setNotice('');
         } else setNotice('配置、权限或源页面已变化；任务、旧结果和输入绑定已失效。请主动重新发送或回原页重新捕获。');
@@ -132,7 +136,7 @@ export function WorkbenchApp(): React.ReactElement {
     port.current.postMessage({ type: 'page.command', id, contextId: context.contextId, tabId: page.tabId, action });
   };
 
-  const translate: Translate = (text, signal, operation = 'translate') => {
+  const translate = (text: string, signal: AbortSignal, operation: WritingOperation = 'translate', image = false): Promise<Reply<string>> => {
     const connection = port.current;
     const snapshot = current.current;
     if (!connection || !snapshot || signal.aborted) return Promise.resolve(fail('interrupted'));
@@ -148,7 +152,8 @@ export function WorkbenchApp(): React.ReactElement {
         resolve(reply);
       } });
       signal.addEventListener('abort', cancel, { once: true });
-      connection.postMessage({ type: 'translate', id, contextId: snapshot.contextId, text, operation });
+      connection.postMessage(image ? { type: 'image', id, contextId: snapshot.contextId, dataUrl: text }
+        : { type: 'translate', id, contextId: snapshot.contextId, text, operation });
     });
   };
 
@@ -187,6 +192,7 @@ export function WorkbenchApp(): React.ReactElement {
         </Stack></Paper>}
         <Tabs value={tab} onChange={(_, value: string) => setTab(value)} aria-label="工作台工具">
           <Tab value="text" label={capture ? '源输入预览' : '文字与写作'} /><Tab value="documents" label="TXT / HTML 文档" disabled={!!capture} />
+          <Tab value="images" label="图片与截图" disabled={!!capture} />
         </Tabs>
         <Box role="tabpanel" aria-label="文字与写作内容" hidden={tab !== 'text'}>
           <TextWorkbench revision={revision} translate={translate} ready={ready}
@@ -196,6 +202,15 @@ export function WorkbenchApp(): React.ReactElement {
         <Box role="tabpanel" aria-label="文本文档内容" hidden={tab !== 'documents'}>
           <DocumentsPanel configuration={{ revision, recipient: settings?.prefix ?? '',
             model: settings?.model ?? '', targetLanguage: settings?.targetLanguage ?? '', ready }} translate={translate} />
+        </Box>
+        <Box role="tabpanel" aria-label="图片与截图内容" hidden={tab !== 'images'}>
+          <ImagesPanel configuration={{ revision, recipient: settings?.prefix ?? '', model: settings?.model ?? '',
+            targetLanguage: settings?.targetLanguage ?? '', ready }} initialImage={image}
+            recognize={async (dataUrl, signal) => {
+              const reply = await translate(dataUrl, signal, 'translate', true);
+              return reply.ok ? { ok: true, value: JSON.parse(reply.value) as ImageRecognition } : reply;
+            }} />
+          <Typography variant="caption">图像路径不发送本地术语表：识别前没有源文可用于匹配术语。</Typography>
         </Box>
       </Stack>
     </Box>

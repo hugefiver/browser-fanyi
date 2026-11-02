@@ -42,7 +42,7 @@ function fixture() {
   const pages = { activeTab: vi.fn(async () => capture.url), version: vi.fn(() => 0), inject: vi.fn(async () => undefined) };
   const ready = vi.fn(async (): Promise<Reply<TranslationSnapshot>> => ({ ok: true, value: settings }));
   const send = vi.fn(async (_settings: TranslationSnapshot, text: string, _signal: AbortSignal, _operation: WritingOperation): Promise<Reply<string>> => ({ ok: true, value: `done:${text}` }));
-  const workbench = new Workbench(api as unknown as typeof browser, pages as unknown as PageSessions, ready, send, async () => context);
+  const workbench = new Workbench(api as unknown as typeof browser, pages as unknown as PageSessions, ready, send, async () => context, async () => ({ ok: true, value: '{"source":"image","translation":"图像"}' }));
   workbench.install();
   return { workbench, api, pages, ready, send, onNavigate, onRemoved,
     setContext: (id: string) => { context = { ...context, contextId: id }; },
@@ -69,6 +69,20 @@ describe('workbench ownership and explicit tasks', () => {
     start(port, 'writing', 'draft', 'polish');
     await vi.waitFor(() => expect(results(port)).toHaveLength(1));
     expect(ctx.send.mock.calls[0][3]).toBe('polish');
+  });
+
+  it('binds cropped previews to one workbench tab and sends images only on confirmation', async () => {
+    const ctx = fixture();
+    await ctx.workbench.openImage('data:image/png;base64,cHJldmlldw==', 'boot:0');
+    const url = ctx.api.tabs.create.mock.calls[0][0].url;
+    expect(ctx.connect(new Port({ id: 'test', url, tab: { id: 99 } as Runtime.MessageSender['tab'] })).disconnected).toBe(true);
+    const port = ctx.connect(new Port({ id: 'test', url, tab: { id: 22 } as Runtime.MessageSender['tab'] }));
+    await hello(port);
+    expect(port.posted[0]).toMatchObject({ type: 'hello', image: 'data:image/png;base64,cHJldmlldw==' });
+    expect(results(port)).toHaveLength(0);
+    port.receive({ type: 'image', id: 'image', contextId: 'boot:0', dataUrl: 'data:image/png;base64,cHJldmlldw==' });
+    await vi.waitFor(() => expect(results(port)).toHaveLength(1));
+    expect(ctx.send).not.toHaveBeenCalled();
   });
 
   it('rejects foreign pages, subframes, query paths and another tab claiming a capture', async () => {

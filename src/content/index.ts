@@ -4,6 +4,7 @@ import type { ContentCommand, Reply } from '../shared/contracts';
 import { createContentEngine } from './engine';
 import { InputAssist } from './input-assist';
 import { inputCommand } from '../shared/workbench';
+import { CaptureRegion, capturePageSnapshot } from './capture-region';
 
 function isCommand(message: unknown): message is ContentCommand {
   if (typeof message !== 'object' || message === null || !('type' in message)) return false;
@@ -16,9 +17,19 @@ if (window.top === window && !host.__browserFanyiContent) {
   const engine = createContentEngine(document, request => browser.runtime.sendMessage(request) as Promise<Reply<string>>);
   host.__browserFanyiContent = engine;
   const inputAssist = new InputAssist(document);
-  window.addEventListener('pagehide', () => inputAssist.invalidate());
+  const region = new CaptureRegion(document);
+  const captureInstance = crypto.randomUUID();
+  window.addEventListener('pagehide', () => { inputAssist.invalidate(); region.cancel(); });
   browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.MessageSender) => {
     if (sender.id !== browser.runtime.id) return undefined;
+    if (message && typeof message === 'object' && 'type' in message
+      && ['capture.select', 'capture.inspect', 'capture.cancel'].includes(String(message.type))) {
+      if (sender.tab || ![browser.runtime.getURL('background.js'), browser.runtime.getURL('_generated_background_page.html')].includes(sender.url ?? '')) return undefined;
+      if (message.type === 'capture.select') return region.start().then(result => ({ documentId: captureInstance, result }));
+      if (message.type === 'capture.inspect') return Promise.resolve({ documentId: captureInstance, page: capturePageSnapshot(document) });
+      region.cancel();
+      return Promise.resolve(null);
+    }
     if (inputCommand(message)) {
       if (sender.tab || ![browser.runtime.getURL('background.js'), browser.runtime.getURL('_generated_background_page.html')].includes(sender.url ?? '')) return undefined;
       if (message.type === 'input.capture') return Promise.resolve(inputAssist.capture());
@@ -29,7 +40,7 @@ if (window.top === window && !host.__browserFanyiContent) {
       return Promise.resolve({ ok: true, value: null });
     }
     if (!isCommand(message)) return undefined;
-    if (message.type === 'content.invalidate') inputAssist.invalidate();
+    if (message.type === 'content.invalidate') { inputAssist.invalidate(); region.cancel(); }
     return engine.handle(message);
   });
 }

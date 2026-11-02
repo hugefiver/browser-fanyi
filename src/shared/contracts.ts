@@ -34,6 +34,7 @@ export type UiRequest =
   | { type: 'hover.command'; tabId: number; enabled: boolean }
   | { type: 'selection.start'; tabId: number }
   | { type: 'input.start'; tabId: number }
+  | { type: 'capture.start'; tabId: number }
   | { type: 'selection.get'; id: string }
   | { type: 'selection.retry'; id: string }
   | { type: 'selection.close'; id: string };

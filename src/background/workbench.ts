@@ -27,11 +27,25 @@ interface Connection {
 export class Workbench {
   private connections = new Set<Connection>();
   private bindings = new Map<string, Binding>();
+  private images = new Map<string, { dataUrl: string; ownerTabId?: number; contextId: string }>();
 
   constructor(private readonly api: typeof browser, private readonly pages: PageSessions,
     private readonly ready: () => Promise<Reply<TranslationSnapshot>>,
     private readonly send: (settings: TranslationSnapshot, text: string, signal: AbortSignal, operation: WritingOperation) => Promise<Reply<string>>,
-    private readonly getContext: () => Promise<WorkbenchContext>) {}
+    private readonly getContext: () => Promise<WorkbenchContext>,
+    private readonly sendImage: (settings: TranslationSnapshot, dataUrl: string, signal: AbortSignal) => Promise<Reply<string>>) {}
+
+  async openImage(dataUrl: string, contextId: string): Promise<Reply<null>> {
+    if ((await this.getContext()).contextId !== contextId) return fail('interrupted');
+    const token = crypto.randomUUID();
+    const image = { dataUrl, contextId, ownerTabId: undefined as number | undefined };
+    this.images.set(token, image);
+    try {
+      const tab = await this.api.tabs.create({ url: this.api.runtime.getURL(`workbench.html#image=${token}`) });
+      image.ownerTabId = tab.id;
+      return { ok: true, value: null };
+    } catch { this.images.delete(token); return fail('unsupported'); }
+  }
 
   install(): void {
     this.api.runtime.onConnect.addListener(port => {
@@ -77,6 +91,7 @@ export class Workbench {
   }
 
   async contextChanged(): Promise<void> {
+    this.images.clear();
     for (const binding of [...this.bindings.values()]) this.dropBinding(binding);
     for (const connection of this.connections) {
       this.cancel(connection);
@@ -101,17 +116,22 @@ export class Workbench {
     const sender = port.sender;
     const expected = new URL(this.api.runtime.getURL('workbench.html'));
     let token: string | undefined;
+    let imageToken: string | undefined;
     try {
       const url = new URL(sender?.url ?? '');
       if (sender?.id !== this.api.runtime.id || sender.frameId !== undefined && sender.frameId !== 0
         || url.origin !== expected.origin || url.protocol !== expected.protocol || url.host !== expected.host
         || url.pathname !== expected.pathname || url.search && url.search !== '?sidebar=1'
-        || url.hash && (url.search || !/^#input=[\da-f-]{36}$/.test(url.hash))) throw new Error('sender');
-      token = url.hash ? url.hash.slice(7) : undefined;
+        || url.hash && (url.search || !/^#(?:input|image)=[\da-f-]{36}$/.test(url.hash))) throw new Error('sender');
+      token = url.hash.startsWith('#input=') ? url.hash.slice(7) : undefined;
+      imageToken = url.hash.startsWith('#image=') ? url.hash.slice(7) : undefined;
     } catch { port.disconnect(); return; }
     const binding = token ? this.bindings.get(token) : undefined;
     if (token && (!binding || binding.ownerTabId === undefined || binding.ownerTabId !== sender?.tab?.id
       || [...this.connections].some(connection => connection.binding === binding))) { port.disconnect(); return; }
+    const image = imageToken ? this.images.get(imageToken) : undefined;
+    if (imageToken && (!image || image.ownerTabId === undefined || image.ownerTabId !== sender?.tab?.id)) { port.disconnect(); return; }
+    if (imageToken) this.images.delete(imageToken);
     const connection: Connection = { port, binding, tasks: new Map(), closed: false };
     this.connections.add(connection);
     port.onDisconnect.addListener(() => this.disconnect(connection));
@@ -128,7 +148,8 @@ export class Workbench {
         this.dropBinding(binding); connection.binding = undefined;
       }
       connection.context = context;
-      this.post(connection, { type: 'hello', context, capture: connection.binding?.capture });
+      this.post(connection, { type: 'hello', context, capture: connection.binding?.capture,
+        image: image?.contextId === context.contextId ? image.dataUrl : undefined });
     } catch { this.disconnect(connection); port.disconnect(); }
   }
 
@@ -164,6 +185,7 @@ export class Workbench {
   }
 
   private invalidateTab(tabId: number, closed: boolean): void {
+    for (const [token, image] of this.images) if (closed && image.ownerTabId === tabId) this.images.delete(token);
     for (const binding of [...this.bindings.values()]) {
       if (binding.tabId !== tabId && !(closed && binding.ownerTabId === tabId)) continue;
       this.dropBinding(binding);
@@ -184,7 +206,7 @@ export class Workbench {
       return;
     }
     if (!connection.context || value.contextId !== connection.context.contextId) return;
-    if (value.type === 'translate') await this.translate(connection, value);
+    if (value.type === 'translate' || value.type === 'image') await this.translate(connection, value);
     else if (value.type === 'page.status' || value.type === 'page.command') await this.pageRequest(connection, value);
     else await this.writeInput(connection, value);
   }
@@ -216,20 +238,22 @@ export class Workbench {
     this.post(connection, { type: 'page', id: message.id, contextId: message.contextId, tabId, reply });
   }
 
-  private async translate(connection: Connection, message: Extract<import('../shared/workbench').WorkbenchClientMessage, { type: 'translate' }>): Promise<void> {
+  private async translate(connection: Connection, message: Extract<import('../shared/workbench').WorkbenchClientMessage, { type: 'translate' | 'image' }>): Promise<void> {
     if (connection.tasks.has(message.id)) return;
     if (connection.tasks.size >= 2) {
       this.post(connection, { type: 'result', id: message.id, contextId: message.contextId, reply: fail('limit') });
       return;
     }
-    if (connection.binding && message.text !== connection.binding.capture.sourceText) return;
+    if (connection.binding && (message.type === 'image' || message.text !== connection.binding.capture.sourceText)) return;
     const controller = new AbortController();
     connection.tasks.set(message.id, controller);
     try {
       const settings = await this.ready();
       const context = await this.getContext();
       if (controller.signal.aborted || context.contextId !== message.contextId) return;
-      const reply = settings.ok ? await this.send(settings.value, message.text, controller.signal, message.operation) : settings;
+      const reply = !settings.ok ? settings : message.type === 'image'
+        ? await this.sendImage(settings.value, message.dataUrl, controller.signal)
+        : await this.send(settings.value, message.text, controller.signal, message.operation);
       if (controller.signal.aborted || connection.closed || (await this.getContext()).contextId !== message.contextId) return;
       if (reply.ok && connection.binding) connection.binding.preview = true;
       this.post(connection, { type: 'result', id: message.id, contextId: message.contextId, reply });

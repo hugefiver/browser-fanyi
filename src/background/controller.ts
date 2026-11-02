@@ -5,7 +5,9 @@ import { endpoint } from '../shared/endpoint';
 import { GlossaryError, matchGlossary } from './glossary';
 import { allowed, request, uiPage } from './messages';
 import { PageSessions } from './pages';
-import { RequestPool, translate } from './provider';
+import { RequestPool, translate, recognizeImage } from './provider';
+import { Capture, decodeCaptureImage, type CaptureSelectionEnvelope, type CapturePageEnvelope } from './capture';
+import { parseDataUrl, IMAGE_MAX_PIXELS } from '../shared/images';
 import { Selections } from './selections';
 import { SettingsStore, type StoredSettings, type TranslationSnapshot } from './settings';
 import { Subtitles } from './subtitles';
@@ -57,7 +59,49 @@ export class BackgroundController {
       (settings, text, signal) => this.send(settings, text, signal), () => this.context());
     this.workbench = new Workbench(api, this.pages, () => this.ready(),
       (settings, text, signal, operation) => this.send(settings, text, signal, operation === 'translate', operation),
-      () => this.context());
+      () => this.context(), (settings, dataUrl, signal) => this.sendImage(settings, dataUrl, signal));
+  }
+
+  private async sendImage(settings: TranslationSnapshot, dataUrl: string, signal: AbortSignal): Promise<Reply<string>> {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (signal.aborted) return fail('interrupted');
+    signal.addEventListener('abort', cancel, { once: true });
+    this.controllers.add(controller);
+    try {
+      parseDataUrl(dataUrl, true);
+      const image = await decodeCaptureImage(dataUrl);
+      const valid = image.width * image.height <= IMAGE_MAX_PIXELS;
+      image.dispose();
+      if (!valid) return fail('limit');
+      return await this.pool.run(controller.signal, () => recognizeImage(settings, dataUrl, controller.signal));
+    } catch { return fail('invalid-response'); }
+    finally { signal.removeEventListener('abort', cancel); this.controllers.delete(controller); }
+  }
+
+  private async captureImage(tabId: number): Promise<unknown> {
+    const context = await this.context();
+    const version = this.pages.version(tabId);
+    const capture = new Capture(this.api, {
+      select: async () => {
+        await this.pages.inject(tabId);
+        if (version !== this.pages.version(tabId)) throw new Error('navigation');
+        const result = await this.api.tabs.sendMessage(tabId, { type: 'capture.select' }, { frameId: 0 }) as CaptureSelectionEnvelope;
+        if (version !== this.pages.version(tabId)) throw new Error('navigation');
+        return result;
+      },
+      inspect: async () => {
+        if (version !== this.pages.version(tabId)) throw new Error('navigation');
+        const result = await this.api.tabs.sendMessage(tabId, { type: 'capture.inspect' }, { frameId: 0 }) as CapturePageEnvelope;
+        if (version !== this.pages.version(tabId)) throw new Error('navigation');
+        return result;
+      },
+      cancel: async () => { await this.api.tabs.sendMessage(tabId, { type: 'capture.cancel' }, { frameId: 0 }); },
+    });
+    const reply = await capture.capture(tabId);
+    if (!reply.ok) return reply;
+    if (version !== this.pages.version(tabId)) return fail('interrupted');
+    return this.workbench.openImage(reply.value.dataUrl, context.contextId);
   }
 
   private async ready(): Promise<Reply<TranslationSnapshot>> {
@@ -269,6 +313,7 @@ export class BackgroundController {
         } catch { return fail('unsupported'); }
       }
       case 'input.start': return this.workbench.capture(message.tabId);
+      case 'capture.start': return this.captureImage(message.tabId);
       case 'selection.get': return this.selections.get(message.id, sender);
       case 'selection.retry': return this.selections.retry(message.id, sender);
       case 'selection.close': return this.selections.close(message.id, sender);
