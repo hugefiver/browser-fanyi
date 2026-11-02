@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Independent translation fixture</title></head>
+<body>
+  <p id="first">Hello test world.</p>
+  <p id="linked">Visit <a id="link" href="#destination">our local page</a> today.</p>
+  <button id="counter">Count clicks</button><output id="count"></output>
+  <input id="draft" value="PRIVATE_DRAFT"><input type="password" value="PRIVATE_PASSWORD">
+  <div contenteditable="true">PRIVATE_EDITABLE</div>
+  <p hidden>PRIVATE_HIDDEN</p><div style="display:none">PRIVATE_DISPLAY_NONE</div>
+  <div id="dynamic"></div>
+  <script>
+    window.firstNode = document.querySelector('#first').firstChild;
+    window.counterNode = document.querySelector('#counter');
+    window.clicks = 0;
+    window.counterNode.addEventListener('click', () => { window.clicks++; });
+    window.addText = text => { const p = document.createElement('p'); p.textContent = text; document.querySelector('#dynamic').append(p); return p; };
+  </script>
+</body></html>
