@@ -142,6 +142,22 @@ export const PopupApp: React.FC = () => {
     }
   };
 
+  const handleHoverCommand = async (enabled: boolean) => {
+    if (tabId == null) return;
+    setActionError(null);
+    setActionSuccess(null);
+    setLoadingAction(true);
+    try {
+      const res = (await browser.runtime.sendMessage({ type: 'hover.command', tabId, enabled })) as Reply<PageStatus>;
+      if (res.ok) setPageStatus(res.value);
+      else setActionError(res.error.message);
+    } catch {
+      setActionError('指向翻译启停失败，请稍后重试。');
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
   // 触发选区翻译
   const handleSelectionTranslate = async () => {
     if (tabId == null) return;
@@ -330,7 +346,7 @@ export const PopupApp: React.FC = () => {
                     : 'text.primary',
               }}
             >
-              {phaseLabels[pageStatus.phase]}
+              {pageStatus.hoverEnabled ? '指向翻译已启用' : phaseLabels[pageStatus.phase]}
             </Typography>
           </Stack>
 
@@ -444,6 +460,24 @@ export const PopupApp: React.FC = () => {
           >
             还原页面
           </Button>
+        </Stack>
+
+        <Divider sx={{ my: 0.5 }} />
+
+        <Stack spacing={0.5}>
+          <Button
+            fullWidth
+            variant={pageStatus.hoverEnabled ? 'contained' : 'outlined'}
+            color={pageStatus.hoverEnabled ? 'warning' : 'secondary'}
+            onClick={() => handleHoverCommand(!pageStatus.hoverEnabled)}
+            disabled={loadingAction || isUnsupportedTab || (!pageStatus.hoverEnabled && (!isConfigured || !isAuthorized))}
+            size="small"
+          >
+            {pageStatus.hoverEnabled ? '关闭指向翻译' : '启用指向翻译'}
+          </Button>
+          <Typography variant="caption" color="text.secondary">
+            启用后，按住 Alt 并左键点击普通文字；普通移动和点击不会发送内容。
+          </Typography>
         </Stack>
 
         <Divider sx={{ my: 0.5 }} />

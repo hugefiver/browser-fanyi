@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, act, cleanup } from '@testing-library/react';
+import { render, screen, act, cleanup, fireEvent } from '@testing-library/react';
 import { PopupApp } from '../../src/ui/popup';
 import { PublicSettings, PageStatus, idleStatus } from '../../src/shared/contracts';
 
@@ -131,6 +131,7 @@ describe('PopupApp component behavior', () => {
       completed: 5,
       failed: 0,
       pending: 0,
+      hoverEnabled: false,
     };
 
     mockSendMessage.mockImplementation((msg: unknown) => {
@@ -159,5 +160,35 @@ describe('PopupApp component behavior', () => {
     const restartButton = screen.getByRole('button', { name: '重新翻译' });
     expect(restartButton).not.toBeNull();
     expect(restartButton.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('enables and disables explicit hover mode from the popup', async () => {
+    const settings: PublicSettings = {
+      prefix: 'https://api.example.com/v1', model: 'model', hasKey: false, authorized: true,
+      sourceLanguage: 'auto', targetLanguage: 'zh-CN', mode: 'bilingual',
+    };
+    let status = idleStatus();
+    mockSendMessage.mockImplementation((message: unknown) => {
+      const typed = message as { type?: string; enabled?: boolean };
+      if (typed.type === 'settings.get') return Promise.resolve({ ok: true, value: settings });
+      if (typed.type === 'page.status') return Promise.resolve({ ok: true, value: status });
+      if (typed.type === 'hover.command') {
+        status = { ...idleStatus(), hoverEnabled: Boolean(typed.enabled) };
+        return Promise.resolve({ ok: true, value: status });
+      }
+      return Promise.resolve({ ok: true, value: status });
+    });
+
+    render(<PopupApp />);
+    await act(async () => { await Promise.resolve(); });
+    const enable = screen.getByRole('button', { name: '启用指向翻译' });
+    expect(enable.hasAttribute('disabled')).toBe(false);
+    await act(async () => { fireEvent.click(enable); await Promise.resolve(); });
+    expect(mockSendMessage).toHaveBeenCalledWith({ type: 'hover.command', tabId: 1, enabled: true });
+    expect(screen.getByText('指向翻译已启用')).not.toBeNull();
+    const disable = screen.getByRole('button', { name: '关闭指向翻译' });
+    await act(async () => { fireEvent.click(disable); await Promise.resolve(); });
+    expect(mockSendMessage).toHaveBeenCalledWith({ type: 'hover.command', tabId: 1, enabled: false });
+    expect(screen.getByText(/普通移动和点击不会发送内容/)).not.toBeNull();
   });
 });

@@ -74,27 +74,54 @@ export class BackgroundController {
       if (!request(message)) return fail('permission');
       await this.pages.initialized;
       if (message.type === 'content.translate' || message.type === 'content.cancel') {
-        const authorized = this.pages.authorize(sender, message.sessionId);
+        const authorized = this.pages.authorize(sender, message.sessionId, 'page');
         if (!authorized) return fail('interrupted');
         if (message.type === 'content.cancel') {
           this.pages.stop(authorized.tabId);
           return { ok: true, value: null };
         }
-        if (!message.text.trim() || Array.from(message.text).length > 2000) return fail('limit');
-        const settings = await this.ready();
-        if (!settings.ok) return settings;
-        if (!this.pages.valid(authorized.tabId, authorized.session)) return fail('interrupted');
-        if (authorized.session.requests >= 100) return fail('limit');
-        authorized.session.requests++;
-        const controller = new AbortController();
-        authorized.session.controllers.add(controller);
-        try { return await this.send(settings.value, message.text, controller.signal); }
-        finally { authorized.session.controllers.delete(controller); }
+        return this.translatePage(authorized, message.text);
+      }
+      if (message.type === 'hover.translate' || message.type === 'hover.cancel') {
+        const authorized = this.pages.authorize(sender, message.sessionId, 'hover');
+        if (!authorized || !this.pages.advance(authorized.session, message.sequence)) return fail('interrupted');
+        if (message.type === 'hover.cancel') return { ok: true, value: null };
+        return this.translateHover(authorized, message.text, message.sequence);
       }
       const page = uiPage(sender, this.api.runtime.getURL(''), this.api.runtime.id);
       if (!page || !allowed(page, message.type)) return fail('permission');
       return await this.ui(message, sender);
     } catch { return fail('configuration'); }
+  }
+
+  private async translatePage(authorized: NonNullable<ReturnType<PageSessions['authorize']>>, text: string): Promise<Reply<string>> {
+    if (!text.trim() || Array.from(text).length > 2000) return fail('limit');
+    const settings = await this.ready();
+    if (!settings.ok) return settings;
+    if (!this.pages.valid(authorized.tabId, authorized.session)) return fail('interrupted');
+    if (authorized.session.requests >= 100) return fail('limit');
+    authorized.session.requests++;
+    const controller = new AbortController();
+    authorized.session.controllers.add(controller);
+    try { return await this.send(settings.value, text, controller.signal); }
+    finally { authorized.session.controllers.delete(controller); }
+  }
+
+  private async translateHover(authorized: NonNullable<ReturnType<PageSessions['authorize']>>, text: string,
+    sequence: number): Promise<Reply<string>> {
+    if (!text.trim() || Array.from(text).length > 2000) return fail('limit');
+    if (authorized.session.requests >= 100) return fail('limit');
+    const settings = await this.ready();
+    if (!settings.ok) return settings;
+    if (!this.pages.valid(authorized.tabId, authorized.session) || !this.pages.current(authorized.session, sequence)) return fail('interrupted');
+    authorized.session.requests++;
+    const controller = new AbortController();
+    authorized.session.controllers.add(controller);
+    try {
+      const reply = await this.send(settings.value, text, controller.signal);
+      return this.pages.valid(authorized.tabId, authorized.session) && this.pages.current(authorized.session, sequence)
+        ? reply : fail('interrupted');
+    } finally { authorized.session.controllers.delete(controller); }
   }
 
   private async ui(message: UiRequest, sender: Runtime.MessageSender): Promise<unknown> {
@@ -116,6 +143,10 @@ export class BackgroundController {
         if (['pause', 'restore', 'mode'].includes(message.action)) return this.pages.command(message);
         const revision = this.revision;
         return this.pages.command(message, () => this.ready(), () => this.revision === revision && !this.updating);
+      }
+      case 'hover.command': {
+        const revision = this.revision;
+        return this.pages.hover(message, () => this.ready(), () => this.revision === revision && !this.updating);
       }
       case 'selection.start': {
         const url = await this.pages.activeTab(message.tabId);

@@ -78,6 +78,22 @@ async function runChecks({ context, cdp, id, base, options, service }) {
     assert.equal(result.ok, true, JSON.stringify(result));
     return result.value;
   };
+  const hoverCommand = async enabled => {
+    const result = await send({ type: 'hover.command', tabId, enabled });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.value;
+  };
+  const altClickText = async selector => {
+    const point = await page.locator(selector).evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element.firstChild);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    await page.keyboard.down('Alt');
+    try { await page.mouse.click(point.x, point.y); }
+    finally { await page.keyboard.up('Alt'); }
+  };
   const status = () => send({ type: 'page.status', tabId });
   await command('start');
   await until(async () => (await status()).value?.phase === 'complete');
@@ -125,6 +141,47 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   assert.equal(await page.locator('#draft').inputValue(), 'NEW_PRIVATE_DRAFT');
   assert(await page.evaluate(() => firstNode === document.querySelector('#first').firstChild && counterNode === document.querySelector('#counter')));
   console.log('PASS: pause/resume ignores late output; retry only failures; lossless restoration');
+
+  const beforeHover = service.requests.length;
+  assert.equal((await hoverCommand(true)).hoverEnabled, true);
+  assert.equal(service.requests.length, beforeHover);
+  await page.locator('#first').click();
+  await page.locator('#counter').click({ modifiers: ['Alt'] });
+  assert.equal(await page.evaluate(() => clicks), 2);
+  await page.evaluate(() => document.querySelector('#first').dispatchEvent(new MouseEvent('click', {
+    bubbles: true, altKey: true, button: 0, clientX: 20, clientY: 20,
+  })));
+  await new Promise(done => setTimeout(done, 200));
+  assert.equal(service.requests.length, beforeHover);
+  await altClickText('#first');
+  await until(() => service.requests.length === beforeHover + 1);
+  assert.equal(service.requests.at(-1).text, 'Website latest text.');
+  await page.getByText('译文：Website latest text.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭指向翻译' }).click();
+  assert.equal(await page.locator('[data-browser-fanyi="hover"]').count(), 0);
+  console.log('PASS: hover enable sends nothing; only real Alt+left click sends one non-interactive Text node');
+
+  service.control.delay = 700;
+  await page.evaluate(() => { const node = addText('Hover close delay.'); node.id = 'hover-close'; });
+  await altClickText('#hover-close');
+  await until(() => service.requests.some(item => item.text === 'Hover close delay.'));
+  await page.getByRole('button', { name: '关闭指向翻译' }).click();
+  await new Promise(done => setTimeout(done, 900));
+  assert.equal(await page.locator('[data-browser-fanyi="hover"]').count(), 0);
+  await page.evaluate(() => { const node = addText('Hover mutation delay.'); node.id = 'hover-mutation'; });
+  await altClickText('#hover-mutation');
+  await until(() => service.requests.some(item => item.text === 'Hover mutation delay.'));
+  await page.evaluate(() => { document.querySelector('#hover-mutation').firstChild.data = 'Hover node changed.'; });
+  await new Promise(done => setTimeout(done, 900));
+  assert.equal(await page.locator('[data-browser-fanyi="hover"]').count(), 0);
+  service.control.delay = 0;
+  await command('start');
+  await until(async () => (await status()).value?.phase === 'complete');
+  assert.equal((await status()).value.hoverEnabled, false);
+  await command('restore');
+  assert.equal((await hoverCommand(true)).hoverEnabled, true);
+  assert.equal((await hoverCommand(false)).hoverEnabled, false);
+  console.log('PASS: close/node mutation suppress late hover results; whole-page start is mutually exclusive; popup command disables');
 
   await page.evaluate(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('#first')); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); });
   const beforeSelection = service.requests.length;

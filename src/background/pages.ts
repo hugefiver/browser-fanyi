@@ -5,16 +5,20 @@ import type { StoredSettings } from './settings';
 
 interface Session {
   id: string;
+  kind: 'page' | 'hover';
   url: string;
   requests: number;
+  sequence: number;
   controllers: Set<AbortController>;
 }
 
 type PageRequest = Extract<UiRequest, { type: 'page.command' }>;
+type HoverRequest = Extract<UiRequest, { type: 'hover.command' }>;
 const INJECTED_TABS = 'injectedTabIds';
 
 export class PageSessions {
   private sessions = new Map<number, Session>();
+  private pendingHover = new Map<number, object>();
   private revisions = new Map<number, number>();
   private contentTabs = new Set<number>();
   private registryWrite = Promise.resolve();
@@ -60,7 +64,8 @@ export class PageSessions {
 
   async command(input: PageRequest, loadSettings?: () => Promise<Reply<StoredSettings>>,
     current: () => boolean = () => true): Promise<Reply<PageStatus>> {
-    if (loadSettings || ['pause', 'restore'].includes(input.action)) this.stop(input.tabId);
+    const active = this.sessions.get(input.tabId);
+    if (loadSettings || (active?.kind !== 'hover' && ['pause', 'restore'].includes(input.action))) this.stop(input.tabId);
     const revision = this.version(input.tabId);
     const url = await this.activeTab(input.tabId);
     if (!url) return fail('unsupported');
@@ -79,7 +84,7 @@ export class PageSessions {
       await this.inject(input.tabId);
       const tab = await this.api.tabs.get(input.tabId);
       if (!current() || this.revisions.get(input.tabId) !== revision || tab.url !== url) return fail('interrupted');
-      const session: Session = { id: crypto.randomUUID(), url, requests: 0, controllers: new Set() };
+      const session: Session = { id: crypto.randomUUID(), kind: 'page', url, requests: 0, sequence: 0, controllers: new Set() };
       this.sessions.set(input.tabId, session);
       const preferences = { sourceLanguage: settings.sourceLanguage, targetLanguage: settings.targetLanguage,
         mode: input.mode ?? settings.mode };
@@ -91,21 +96,76 @@ export class PageSessions {
     }
   }
 
+  async hover(input: HoverRequest, loadSettings: () => Promise<Reply<StoredSettings>>,
+    current: () => boolean = () => true): Promise<Reply<PageStatus>> {
+    if (!input.enabled) {
+      if (this.sessions.get(input.tabId)?.kind === 'hover' || this.pendingHover.has(input.tabId)) this.stop(input.tabId);
+      const url = await this.activeTab(input.tabId);
+      if (!url) return fail('unsupported');
+      try {
+        return await this.api.tabs.sendMessage(input.tabId,
+          { type: 'hover.command', enabled: false } satisfies ContentCommand, { frameId: 0 });
+      } catch { return { ok: true, value: idleStatus() }; }
+    }
+
+    this.stop(input.tabId);
+    const revision = this.version(input.tabId);
+    const pending = {};
+    this.pendingHover.set(input.tabId, pending);
+    try {
+      const url = await this.activeTab(input.tabId);
+      if (!url) return fail('unsupported');
+      if (!current() || this.version(input.tabId) !== revision) return fail('interrupted');
+      const loaded = await loadSettings();
+      if (!loaded.ok) return loaded;
+      if (!current() || this.version(input.tabId) !== revision) return fail('interrupted');
+      try {
+        await this.inject(input.tabId);
+        const tab = await this.api.tabs.get(input.tabId);
+        if (!current() || this.revisions.get(input.tabId) !== revision || tab.url !== url) return fail('interrupted');
+        const session: Session = { id: crypto.randomUUID(), kind: 'hover', url, requests: 0, sequence: 0, controllers: new Set() };
+        this.sessions.set(input.tabId, session);
+        const settings = loaded.value;
+        const preferences = { sourceLanguage: settings.sourceLanguage, targetLanguage: settings.targetLanguage, mode: settings.mode };
+        return await this.api.tabs.sendMessage(input.tabId,
+          { type: 'hover.command', enabled: true, grant: { sessionId: session.id, preferences } } satisfies ContentCommand,
+          { frameId: 0 });
+      } catch {
+        if (this.revisions.get(input.tabId) === revision) this.stop(input.tabId);
+        return fail('unsupported');
+      }
+    } finally {
+      if (this.pendingHover.get(input.tabId) === pending) this.pendingHover.delete(input.tabId);
+    }
+  }
+
   version(tabId: number): number { return this.revisions.get(tabId) ?? 0; }
 
-  authorize(sender: Runtime.MessageSender, id: string): { tabId: number; session: Session } | undefined {
+  authorize(sender: Runtime.MessageSender, id: string, kind: Session['kind']): { tabId: number; session: Session } | undefined {
     const tabId = sender.tab?.id;
     if (sender.id !== this.api.runtime.id || sender.frameId !== 0 || tabId === undefined) return;
     const session = this.sessions.get(tabId);
     // sender.url can retain the document's initial URL after same-document navigation.
-    if (!session || session.id !== id || sender.tab?.url !== session.url) return;
+    if (!session || session.id !== id || session.kind !== kind || sender.tab?.url !== session.url) return;
     return { tabId, session };
+  }
+
+  advance(session: Session, sequence: number): boolean {
+    if (session.kind !== 'hover' || sequence <= session.sequence) return false;
+    session.sequence = sequence;
+    session.controllers.forEach((controller) => controller.abort());
+    return true;
+  }
+
+  current(session: Session, sequence: number): boolean {
+    return session.kind === 'hover' && session.sequence === sequence;
   }
 
   valid(tabId: number, session: Session): boolean { return this.sessions.get(tabId) === session; }
 
   stop(tabId: number): void {
     this.revisions.set(tabId, (this.revisions.get(tabId) ?? 0) + 1);
+    this.pendingHover.delete(tabId);
     const session = this.sessions.get(tabId);
     this.sessions.delete(tabId);
     session?.controllers.forEach((controller) => controller.abort());

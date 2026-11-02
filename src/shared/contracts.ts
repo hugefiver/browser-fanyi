@@ -8,9 +8,9 @@ export interface SaveSettings extends Preferences { prefix: string; model: strin
 export const defaultPreferences: Preferences = { sourceLanguage: 'auto', targetLanguage: 'zh-CN', mode: 'bilingual' };
 export type PagePhase = 'idle' | 'running' | 'complete' | 'paused' | 'partial' | 'interrupted' | 'empty' | 'limit';
 export interface PageStatus {
-  phase: PagePhase; mode: DisplayMode; total: number; completed: number; failed: number; pending: number; error?: Failure;
+  phase: PagePhase; mode: DisplayMode; total: number; completed: number; failed: number; pending: number; hoverEnabled: boolean; error?: Failure;
 }
-export const idleStatus = (): PageStatus => ({ phase: 'idle', mode: 'bilingual', total: 0, completed: 0, failed: 0, pending: 0 });
+export const idleStatus = (): PageStatus => ({ phase: 'idle', mode: 'bilingual', total: 0, completed: 0, failed: 0, pending: 0, hoverEnabled: false });
 export type PageAction = 'start' | 'pause' | 'resume' | 'retry' | 'restore' | 'mode';
 export interface Grant { sessionId: string; preferences: Preferences }
 export interface SelectionState { id: string; source: string; phase: 'running' | 'complete' | 'failed'; text?: string; error?: Failure }
@@ -21,15 +21,19 @@ export type UiRequest =
   | { type: 'service.test' }
   | { type: 'page.command'; tabId: number; action: PageAction; mode?: DisplayMode }
   | { type: 'page.status'; tabId: number }
+  | { type: 'hover.command'; tabId: number; enabled: boolean }
   | { type: 'selection.start'; tabId: number }
   | { type: 'selection.get'; id: string }
   | { type: 'selection.retry'; id: string }
   | { type: 'selection.close'; id: string };
 export type ContentRequest =
   | { type: 'content.translate'; sessionId: string; text: string }
-  | { type: 'content.cancel'; sessionId: string };
+  | { type: 'content.cancel'; sessionId: string }
+  | { type: 'hover.translate'; sessionId: string; sequence: number; text: string }
+  | { type: 'hover.cancel'; sessionId: string; sequence: number };
 export type ContentCommand =
   | { type: 'content.command'; action: PageAction; grant?: Grant; mode?: DisplayMode }
+  | { type: 'hover.command'; enabled: boolean; grant?: Grant }
   | { type: 'content.status' }
   | { type: 'content.selection' }
   | { type: 'content.invalidate'; error: Failure };

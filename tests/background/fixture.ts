@@ -52,7 +52,9 @@ export async function fixture() {
   controller.install();
   const grant = (): Grant => {
     const commands = sendMessage.mock.calls.map(([, command]) => command).reverse();
-    for (const command of commands) if (command.type === 'content.command' && command.grant) return command.grant;
+    for (const command of commands) {
+      if ((command.type === 'content.command' || command.type === 'hover.command') && command.grant) return command.grant;
+    }
     throw new Error('No issued grant');
   };
   const start = async () => {

@@ -5,7 +5,8 @@ import { createContentEngine } from './engine';
 
 function isCommand(message: unknown): message is ContentCommand {
   if (typeof message !== 'object' || message === null || !('type' in message)) return false;
-  return message.type === 'content.command' || message.type === 'content.status' || message.type === 'content.selection' || message.type === 'content.invalidate';
+  return message.type === 'content.command' || message.type === 'hover.command' || message.type === 'content.status'
+    || message.type === 'content.selection' || message.type === 'content.invalidate';
 }
 
 const host = globalThis as typeof globalThis & { __browserFanyiContent?: ReturnType<typeof createContentEngine> };

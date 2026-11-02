@@ -1,6 +1,7 @@
 import type { ContentCommand, ContentRequest, DisplayMode, Failure, Grant, PageStatus, Reply } from '../shared/contracts';
 import { errorMessages, fail } from '../shared/contracts';
 import { PageText, type Piece, type TextEntry } from './dom';
+import { HoverTranslation } from './hover';
 
 export type ContentTransport = (request: ContentRequest) => Promise<Reply<string>>;
 const requestTimeout = 30_000;
@@ -20,6 +21,12 @@ export function createContentEngine(document: Document, request: ContentTranspor
   let urlTimer: ReturnType<typeof setInterval> | undefined;
   const localCancels = new Set<() => void>();
   const page = new PageText(document, scheduleScan);
+  const hover = new HoverTranslation(document, request, node => page.eligible(node), failure => {
+    phase = 'interrupted';
+    error = failure;
+    if (urlTimer !== undefined) clearInterval(urlTimer);
+    urlTimer = undefined;
+  });
 
   function status(): PageStatus {
     const pieces = [...page.entries.values()].flatMap(entry => entry.pieces);
@@ -32,7 +39,8 @@ export function createContentEngine(document: Document, request: ContentTranspor
     else if (pending > 0) state = 'running';
     else if (failed > 0) state = 'partial';
     else state = pieces.length ? 'complete' : 'empty';
-    return { phase: state, mode, total: pieces.length, completed, failed, pending, ...(failure ? { error: failure } : {}) };
+    return { phase: state, mode, total: pieces.length, completed, failed, pending, hoverEnabled: hover.enabled,
+      ...(failure ? { error: failure } : {}) };
   }
 
   function cancel(): void {
@@ -60,8 +68,9 @@ export function createContentEngine(document: Document, request: ContentTranspor
   }
 
   function checkUrl(): boolean {
-    if (phase !== 'idle' && window.location.href !== sessionUrl) {
+    if ((phase !== 'idle' || hover.enabled) && window.location.href !== sessionUrl) {
       end({ code: 'interrupted', message: '页面地址已改变，请主动重新开始。' });
+      hover.stop();
       return false;
     }
     return true;
@@ -151,7 +160,10 @@ export function createContentEngine(document: Document, request: ContentTranspor
   }
 
   function navigation(): void {
-    if (phase !== 'idle') end({ code: 'interrupted', message: '页面导航已结束翻译，请主动重新开始。' });
+    if (phase !== 'idle' || hover.enabled) {
+      end({ code: 'interrupted', message: '页面导航已结束翻译，请主动重新开始。' });
+      hover.stop();
+    }
   }
   window.addEventListener('pagehide', navigation);
   window.addEventListener('popstate', navigation);
@@ -171,15 +183,31 @@ export function createContentEngine(document: Document, request: ContentTranspor
     }
     if (command.type === 'content.invalidate') {
       end(command.error);
+      hover.stop();
       return { ok: true, value: status() };
     }
     if (command.type === 'content.status') return { ok: true, value: status() };
+    if (command.type === 'hover.command') {
+      if (!command.enabled) {
+        hover.stop();
+        if (!grant) { phase = 'idle'; error = undefined; }
+        if (!grant && urlTimer !== undefined) clearInterval(urlTimer);
+        if (!grant) urlTimer = undefined;
+        return { ok: true, value: status() };
+      }
+      if (!command.grant) return fail('interrupted');
+      end();
+      sessionUrl = window.location.href;
+      hover.start(command.grant);
+      if (urlTimer === undefined) urlTimer = setInterval(checkUrl, 250);
+      return { ok: true, value: status() };
+    }
     return execute(command);
   }
 
   async function execute(command: Extract<ContentCommand, { type: 'content.command' }>): Promise<Reply<PageStatus>> {
     if (command.action === 'restore') {
-      end();
+      if (grant || phase !== 'idle') end();
     } else if (command.action === 'mode') {
       if (command.mode) mode = command.mode;
       for (const entry of page.entries.values()) page.show(entry, mode);
@@ -192,6 +220,7 @@ export function createContentEngine(document: Document, request: ContentTranspor
     } else {
       if (!command.grant) return fail('interrupted');
       if (command.action === 'start') {
+        hover.stop();
         end();
         sessionUrl = window.location.href;
         mode = command.mode ?? command.grant.preferences.mode;
@@ -223,6 +252,7 @@ export function createContentEngine(document: Document, request: ContentTranspor
 
   return { handle, status, dispose: () => {
     end();
+    hover.stop();
     window.removeEventListener('pagehide', navigation);
     window.removeEventListener('popstate', navigation);
     window.removeEventListener('hashchange', navigation);

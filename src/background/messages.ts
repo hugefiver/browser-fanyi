@@ -24,9 +24,14 @@ export function request(value: unknown): value is UiRequest | ContentRequest {
       && ['start', 'pause', 'resume', 'retry', 'restore', 'mode'].includes(String(value.action))
       && (value.mode === undefined || value.mode === 'bilingual' || value.mode === 'translation')
       && (value.action !== 'mode' || value.mode !== undefined);
+    case 'hover.command': return Number.isInteger(value.tabId) && typeof value.enabled === 'boolean';
     case 'selection.get': case 'selection.retry': case 'selection.close': return typeof value.id === 'string';
     case 'content.translate': return typeof value.sessionId === 'string' && typeof value.text === 'string';
     case 'content.cancel': return typeof value.sessionId === 'string';
+    case 'hover.translate': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
+      && Number.isSafeInteger(value.sequence) && value.sequence > 0 && typeof value.text === 'string';
+    case 'hover.cancel': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
+      && Number.isSafeInteger(value.sequence) && value.sequence > 0;
     default: return false;
   }
 }
@@ -47,6 +52,6 @@ export function uiPage(sender: Runtime.MessageSender, extensionUrl: string, exte
 
 export function allowed(page: UiPage, type: UiRequest['type'] | ContentRequest['type']): boolean {
   if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test'].includes(type);
-  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'selection.start'].includes(type);
+  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start'].includes(type);
   return ['selection.get', 'selection.retry', 'selection.close'].includes(type);
 }
