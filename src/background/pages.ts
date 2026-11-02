@@ -156,7 +156,8 @@ export class PageSessions {
     if (!url) return fail('unsupported');
     try {
       await this.inject(input.tabId);
-      if (!current() || this.version(input.tabId) !== version || (await this.api.tabs.get(input.tabId)).url !== url) return fail('interrupted');
+      let tab = await this.api.tabs.get(input.tabId);
+      if (!current() || this.version(input.tabId) !== version || tab.url !== url) return fail('interrupted');
       if (input.type === 'video.list') return { ok: true, value: await this.api.tabs.sendMessage(input.tabId, { type: 'video.inspect' }, { frameId: 0 }) };
       if (input.action !== 'start') {
         const session = this.sessions.get(input.tabId);
@@ -168,12 +169,13 @@ export class PageSessions {
       }
       const settings = await loadSettings();
       if (!settings.ok) return settings;
-      if (!current() || this.version(input.tabId) !== version || (await this.api.tabs.get(input.tabId)).url !== url) return fail('interrupted');
+      tab = await this.api.tabs.get(input.tabId);
+      if (!current() || this.version(input.tabId) !== version || tab.url !== url) return fail('interrupted');
       const session: Session = { id: crypto.randomUUID(), kind: 'video', url, requests: 0, sequence: 0, controllers: new Set() };
       this.sessions.set(input.tabId, session);
       const { sourceLanguage, targetLanguage } = settings.value;
       return { ok: true, value: await this.api.tabs.sendMessage(input.tabId, { type: 'video.control', action: 'start',
-        videoIndex: input.videoIndex, trackIndex: input.trackIndex,
+        choiceId: input.choiceId,
         grant: { sessionId: session.id, preferences: { sourceLanguage, targetLanguage, mode: input.mode } } }, { frameId: 0 }) };
     } catch { return fail('unsupported'); }
   }

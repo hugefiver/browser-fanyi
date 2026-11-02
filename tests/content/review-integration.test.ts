@@ -33,6 +33,58 @@ describe('review bound to actual page entries', () => {
     expect(f.send).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps empty and whitespace edits owned across mode, learning, and reset operations', async () => {
+    const f = fixture('<p>Editable source</p>');
+    const paragraph = document.querySelector('p')!;
+    await f.start();
+    await vi.waitFor(() => expect(f.engine.status().completed).toBe(1));
+    await f.engine.handle({ type: 'content.command', action: 'mode', mode: 'translation' });
+    await f.engine.handle({ type: 'content.command', action: 'review' });
+
+    for (const text of ['', '   ']) {
+      editor().value = text;
+      button('保存').click();
+      expect(paragraph.firstChild!.textContent).toBe(text);
+
+      await f.engine.handle({ type: 'content.command', action: 'mode', mode: 'bilingual' });
+      expect(paragraph.firstChild!.textContent).toBe('Editable source');
+      await f.engine.handle({ type: 'content.command', action: 'mode', mode: 'translation' });
+      expect(paragraph.firstChild!.textContent).toBe(text);
+
+      learning(true);
+      expect(paragraph.firstChild!.textContent).toBe('Editable source');
+      expect(editor().hidden).toBe(true);
+      button('揭示译文').click();
+      expect(paragraph.firstChild!.textContent).toBe('Editable source');
+      learning(false);
+      expect(paragraph.firstChild!.textContent).toBe(text);
+
+      button('恢复服务译文').click();
+      expect(paragraph.firstChild!.textContent).toBe('译:Editable source');
+    }
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+
+  it('does not reclaim a whitespace website update after an owned empty edit', async () => {
+    const f = fixture('<p>Website source</p>');
+    const paragraph = document.querySelector('p')!;
+    await f.start();
+    await vi.waitFor(() => expect(f.engine.status().completed).toBe(1));
+    await f.engine.handle({ type: 'content.command', action: 'mode', mode: 'translation' });
+    await f.engine.handle({ type: 'content.command', action: 'review' });
+    editor().value = '';
+    button('保存').click();
+
+    paragraph.firstChild!.textContent = '   ';
+    await vi.waitFor(() => expect(panel().querySelectorAll('[data-translation-review-entry]')).toHaveLength(0));
+    await f.engine.handle({ type: 'content.command', action: 'mode', mode: 'bilingual' });
+    learning(true);
+    await f.engine.handle({ type: 'content.command', action: 'restore' });
+
+    expect(paragraph.textContent).toBe('   ');
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+
   it('preserves an unsaved draft across unrelated mutations and completed entries', async () => {
     const late = deferred<Reply<string>>();
     const f = fixture('<p>First</p><p>Second</p>', text => text === 'First' ? Promise.resolve(success('一')) : late.promise);

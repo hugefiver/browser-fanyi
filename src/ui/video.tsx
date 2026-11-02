@@ -17,12 +17,14 @@ export function VideoPanel({ tabId, settings }: { tabId: number | null; settings
       const reply = await browser.runtime.sendMessage(message) as Reply<VideoInfo>;
       if (!reply.ok) { setError(reply.error.message); return; }
       setInfo(reply.value);
+      setSelected(current => reply.value.videos.some(video => video.tracks.some(track =>
+        track.choiceId === current && track.readable && track.cues.length > 0)) ? current : '');
       if (reply.value.state.error) setError(reply.value.state.error);
     } catch { setError('无法读取当前页的可读视频字幕。'); }
     finally { setBusy(false); }
   };
   const tracks = info?.videos.flatMap(video => video.tracks.filter(track => track.readable && track.cues.length > 0)
-    .map(track => ({ value: `${video.videoIndex}:${track.trackIndex}`,
+    .map(track => ({ value: track.choiceId,
       label: `视频 ${video.videoIndex + 1} · ${track.label || track.language || `轨道 ${track.trackIndex + 1}`} · ${track.cues.length} 条` }))) ?? [];
   return <Stack spacing={1} component="section" aria-label="可读视频字幕">
     <Typography variant="h6">可读视频字幕</Typography>
@@ -36,9 +38,8 @@ export function VideoPanel({ tabId, settings }: { tabId: number | null; settings
         <MenuItem value="bilingual">双语</MenuItem><MenuItem value="translation">仅译文</MenuItem>
       </TextField>
       <Typography variant="caption">本次播放期间，仅当前字幕发送给 {settings?.prefix || '未配置服务'}，模型 {settings?.model || '未配置'}，可能产生费用。每轮最多 100 请求；列表跳转不自动播放。关闭或导航结束同意。</Typography>
-      <Button disabled={busy || !selected || !settings?.authorized || !settings.model} onClick={() => {
-        const [videoIndex, trackIndex] = selected.split(':').map(Number);
-        void run({ type: 'video.command', action: 'start', tabId: tabId!, videoIndex, trackIndex, mode });
+      <Button disabled={busy || !tracks.some(track => track.value === selected) || !settings?.authorized || !settings.model} onClick={() => {
+        void run({ type: 'video.command', action: 'start', tabId: tabId!, choiceId: selected, mode });
       }}>同意本次播放发送并开启字幕翻译</Button>
     </>}
     {info && <>

@@ -44,7 +44,9 @@ export class PageText {
   }
 
   eligible(node: Text): boolean {
-    if (this.document.designMode === 'on' || !node.isConnected || !node.data.trim() || !this.document.body?.contains(node)) return false;
+    const entry = this.entries.get(node);
+    const ownedText = entry?.lastWritten === node.data && !!entry.source.trim();
+    if (this.document.designMode === 'on' || !node.isConnected || !node.data.trim() && !ownedText || !this.document.body?.contains(node)) return false;
     for (let element = node.parentElement; element; element = element.parentElement) {
       if (excluded.has(element.tagName.toUpperCase()) || element.hasAttribute(marker) || element.hidden || element.hasAttribute('inert') || element.getAttribute('aria-hidden') === 'true') return false;
       const editable = element.getAttribute('contenteditable');

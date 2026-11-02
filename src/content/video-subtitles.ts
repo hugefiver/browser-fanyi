@@ -10,6 +10,7 @@ export interface VideoSubtitleCue {
 }
 
 export interface VideoSubtitleTrack {
+  choiceId: string;
   trackIndex: number;
   id: string;
   kind: string;
@@ -46,10 +47,14 @@ export interface VideoSubtitleState {
 }
 
 export interface VideoSubtitleStart {
-  videoIndex: number;
-  trackIndex: number;
+  choiceId: string;
   mode: VideoSubtitleMode;
   translate: VideoSubtitleTranslate;
+}
+
+interface VideoChoice {
+  video: HTMLVideoElement;
+  track: TextTrack;
 }
 
 interface CueSnapshot extends VideoSubtitleCue {
@@ -137,6 +142,7 @@ function timeLabel(time: number): string {
 export class VideoSubtitles {
   private readonly window: Window;
   private readonly observer: MutationObserver;
+  private choices = new Map<string, VideoChoice>();
   private session?: Session;
   private ui?: SubtitleUi;
   private current?: ActiveCue;
@@ -156,7 +162,8 @@ export class VideoSubtitles {
   }
 
   list(): VideoSubtitleVideo[] {
-    return [...this.document.querySelectorAll('video')].map((video, videoIndex) => {
+    const choices = new Map<string, VideoChoice>();
+    const videos = [...this.document.querySelectorAll('video')].map((video, videoIndex) => {
       const tracks: VideoSubtitleTrack[] = [];
       let length = 0;
       try { length = video.textTracks.length; } catch { /* Unreadable track lists stay empty. */ }
@@ -164,26 +171,42 @@ export class VideoSubtitles {
         const track = trackAt(video, trackIndex);
         if (!track) continue;
         const cues = readCues(track);
-        tracks.push({ trackIndex, id: track.id, kind: track.kind, label: track.label, language: track.language,
+        const choiceId = crypto.randomUUID();
+        choices.set(choiceId, { video, track });
+        tracks.push({ choiceId, trackIndex, id: track.id, kind: track.kind, label: track.label, language: track.language,
           mode: track.mode, readable: cues !== undefined, cues: cues?.map(publicCue) ?? [] });
       }
       return { videoIndex, currentTime: video.currentTime,
         duration: Number.isFinite(video.duration) ? video.duration : null, tracks };
     });
+    this.choices = choices;
+    return videos;
   }
 
   start(options: VideoSubtitleStart): VideoSubtitleState {
     if (this.destroyed) throw new Error('VideoSubtitles has been destroyed.');
     this.finish();
     this.mode = options.mode;
-    const video = this.document.querySelectorAll('video')[options.videoIndex];
-    const track = video && trackAt(video, options.trackIndex);
-    if (!video) return this.failStart('所选视频不存在。');
-    if (!track) return this.failStart('所选视频没有该文字轨。');
+    const choice = this.choices.get(options.choiceId);
+    if (!choice) return this.failStart('所选视频或文字轨已失效，请刷新后重新选择。');
+    const videoIndex = [...this.document.querySelectorAll('video')].indexOf(choice.video);
+    if (videoIndex < 0) return this.failStart('所选视频或文字轨已失效，请刷新后重新选择。');
+    let trackIndex = -1;
+    let trackCount = 0;
+    try { trackCount = choice.video.textTracks.length; } catch { /* The selected track list is no longer readable. */ }
+    for (let index = 0; index < trackCount; index++) {
+      if (trackAt(choice.video, index) === choice.track) {
+        trackIndex = index;
+        break;
+      }
+    }
+    if (trackIndex < 0) return this.failStart('所选视频或文字轨已失效，请刷新后重新选择。');
+    const video = choice.video;
+    const track = choice.track;
     const cues = readCues(track);
     if (!cues) return this.failStart('所选文字轨的 cue 不可读。');
     if (!cues.length) return this.failStart('所选文字轨暂无可读 cue。');
-    this.session = { videoIndex: options.videoIndex, trackIndex: options.trackIndex, video, track,
+    this.session = { videoIndex, trackIndex, video, track,
       translate: options.translate, url: this.window.location.href, cues, cache: new Map(), requestsUsed: 0 };
     this.phase = 'active';
     this.error = undefined;

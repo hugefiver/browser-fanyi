@@ -180,6 +180,70 @@ describe('site navigation scheduler', () => {
     },
   );
 
+  it.each(['pause', 'restore', 'rule-disabled', 'rule-removed', 'settings-clear'] as const)(
+    'suppresses an immediate SPA navigation when %s overtakes deferred rule loading',
+    async reason => {
+      const ctx = schedulerFixture();
+      const load = deferred<readonly SiteRule[]>();
+      const loadStarted = deferred<void>();
+      vi.mocked(ctx.callbacks.load).mockImplementation(async () => {
+        loadStarted.resolve();
+        return load.promise;
+      });
+      await ctx.scheduler.visibleTabChanged(1);
+      const navigation = ctx.scheduler.documentCommitted({
+        tabId: 1,
+        documentId: 'doc-1',
+        url: 'https://news.example/page',
+      });
+      await loadStarted.promise;
+      const suppression = reason === 'settings-clear'
+        ? ctx.scheduler.stopAll(reason)
+        : reason === 'rule-disabled' || reason === 'rule-removed'
+          ? ctx.scheduler.stopOrigin('https://news.example', reason)
+          : ctx.scheduler.pauseOrRestore(1, 'doc-1', reason);
+      const spa = ctx.scheduler.sameDocumentNavigated({
+        tabId: 1,
+        documentId: 'doc-1',
+        url: 'https://news.example/page#later',
+      });
+      load.resolve([rule('https://news.example')]);
+      await Promise.all([navigation, suppression, spa]);
+      expect(ctx.starts).toEqual([]);
+    },
+  );
+
+  it.each(['pause', 'restore'] as const)(
+    'does not start again when an immediate SPA navigation follows %s during an entered start',
+    async reason => {
+      const ctx = schedulerFixture();
+      const startEntered = deferred<void>();
+      const releaseStart = deferred<void>();
+      vi.mocked(ctx.callbacks.start).mockImplementation(async request => {
+        ctx.starts.push(request);
+        startEntered.resolve();
+        await releaseStart.promise;
+      });
+      await ctx.scheduler.visibleTabChanged(1);
+      const navigation = ctx.scheduler.documentCommitted({
+        tabId: 1,
+        documentId: 'doc-1',
+        url: 'https://news.example/page',
+      });
+      await startEntered.promise;
+      const suppression = ctx.scheduler.pauseOrRestore(1, 'doc-1', reason);
+      const spa = ctx.scheduler.sameDocumentNavigated({
+        tabId: 1,
+        documentId: 'doc-1',
+        url: 'https://news.example/page#later',
+      });
+      releaseStart.resolve();
+      await Promise.all([navigation, suppression, spa]);
+      expect(ctx.starts).toHaveLength(1);
+      expect(ctx.starts[0].signal.aborted).toBe(true);
+    },
+  );
+
   it('invalidates deferred authorization for an old document while allowing the replacement document', async () => {
     const ctx = schedulerFixture();
     const authorization = deferred<boolean>();

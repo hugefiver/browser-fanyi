@@ -36,7 +36,7 @@ export type UiRequest =
   | { type: 'input.start'; tabId: number }
   | { type: 'capture.start'; tabId: number }
   | { type: 'video.list'; tabId: number }
-  | { type: 'video.command'; tabId: number; action: 'start'; videoIndex: number; trackIndex: number; mode: DisplayMode }
+  | { type: 'video.command'; tabId: number; action: 'start'; choiceId: string; mode: DisplayMode }
   | { type: 'video.command'; tabId: number; action: 'stop' | 'continue' }
   | { type: 'selection.get'; id: string }
   | { type: 'selection.retry'; id: string }

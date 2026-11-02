@@ -44,7 +44,8 @@ function setup(cues: TextTrackCue[] = fixtureCues()) {
 }
 
 function start(subtitles: VideoSubtitles, translate: VideoSubtitleTranslate, mode: 'bilingual' | 'translation' = 'bilingual') {
-  return subtitles.start({ videoIndex: 0, trackIndex: 0, mode, translate });
+  const choiceId = subtitles.list()[0].tracks[0].choiceId;
+  return subtitles.start({ choiceId, mode, translate });
 }
 
 function deferred<T>() {
@@ -66,7 +67,7 @@ describe('readable video subtitle sessions', () => {
     const listing = subtitles.list();
     expect(listing).toHaveLength(1);
     expect(listing[0].tracks).toHaveLength(1);
-    expect(listing[0].tracks[0]).toMatchObject({ trackIndex: 0, readable: true, mode: 'disabled' });
+    expect(listing[0].tracks[0]).toMatchObject({ choiceId: expect.any(String), trackIndex: 0, readable: true, mode: 'disabled' });
     expect(listing[0].tracks[0].cues[0]).toMatchObject({ index: 0, text: 'First cue <img src=x onerror=alert(1)>' });
     expect(translate).not.toHaveBeenCalled();
 
@@ -82,6 +83,62 @@ describe('readable video subtitle sessions', () => {
     expect(root.querySelector('b')).toBeNull();
     root.querySelector<HTMLButtonElement>('button[aria-label="切换到仅译文"]')!.click();
     expect(subtitles.getState().mode).toBe('translation');
+  });
+
+  it('starts the originally inspected video and track after preceding objects are inserted', async () => {
+    const { subtitles, track, trackArray } = setup();
+    const choiceId = subtitles.list()[0].tracks[0].choiceId;
+    const leadingVideo = document.createElement('video');
+    const leadingVideoTrack = createTrack();
+    Object.defineProperty(leadingVideo, 'textTracks', { configurable: true, value: [leadingVideoTrack] });
+    document.body.prepend(leadingVideo);
+    const leadingTrack = createTrack();
+    trackArray.unshift(leadingTrack);
+    const translate = vi.fn(async (text: string) => `译:${text}`);
+
+    const state = subtitles.start({ choiceId, mode: 'bilingual', translate });
+
+    expect(state).toMatchObject({ phase: 'active', videoIndex: 1, trackIndex: 1 });
+    expect(track.mode).toBe('hidden');
+    expect(leadingVideoTrack.mode).toBe('disabled');
+    expect(leadingTrack.mode).toBe('disabled');
+    await vi.waitFor(() => expect(translate).toHaveBeenCalledWith(
+      'First cue <img src=x onerror=alert(1)>', expect.any(AbortSignal),
+    ));
+  });
+
+  it.each(['video', 'track'] as const)(
+    'rejects an inspected choice after its %s is removed instead of selecting the replacement',
+    async removed => {
+      const { subtitles, video, trackArray } = setup();
+      const choiceId = subtitles.list()[0].tracks[0].choiceId;
+      const replacementTrack = createTrack();
+      if (removed === 'video') {
+        const replacementVideo = document.createElement('video');
+        Object.defineProperty(replacementVideo, 'textTracks', { configurable: true, value: [replacementTrack] });
+        document.body.append(replacementVideo);
+        video.remove();
+      } else {
+        trackArray.push(replacementTrack);
+        trackArray.splice(0, 1);
+      }
+      const translate = vi.fn(async (text: string) => `译:${text}`);
+
+      expect(subtitles.start({ choiceId, mode: 'bilingual', translate })).toMatchObject({
+        phase: 'error', error: expect.stringContaining('刷新'),
+      });
+      expect(replacementTrack.mode).toBe('disabled');
+      expect(translate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not accept a webpage-provided track identifier as a choice identity', () => {
+    const { subtitles } = setup();
+    const translate = vi.fn(async (text: string) => `译:${text}`);
+    expect(subtitles.start({ choiceId: 'english', mode: 'bilingual', translate })).toMatchObject({
+      phase: 'error', error: expect.stringContaining('刷新'),
+    });
+    expect(translate).not.toHaveBeenCalled();
   });
 
   it('seeks a valid cue from the safe list without playing the video', async () => {

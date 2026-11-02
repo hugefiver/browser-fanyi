@@ -42,7 +42,7 @@ if (window.top === window && !host.__browserFanyiContent) {
           video.stop();
           const sessionId = message.grant.sessionId;
           videoSequence = 0;
-          const state = video.start({ videoIndex: message.videoIndex, trackIndex: message.trackIndex,
+          const state = video.start({ choiceId: message.choiceId,
             mode: message.grant.preferences.mode, translate: async (text, signal) => {
               if (signal.aborted) throw new Error('字幕翻译已取消。');
               const sequence = ++videoSequence;

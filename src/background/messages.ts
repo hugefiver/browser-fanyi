@@ -41,8 +41,8 @@ export function request(value: unknown): value is UiRequest | ContentRequest {
       && (value.action !== 'mode' || value.mode !== undefined);
     case 'video.list': return Number.isInteger(value.tabId);
     case 'video.command': return Number.isInteger(value.tabId) && (value.action === 'stop' || value.action === 'continue'
-      || value.action === 'start' && Number.isInteger(value.videoIndex) && Number.isInteger(value.trackIndex)
-      && Number(value.videoIndex) >= 0 && Number(value.trackIndex) >= 0 && ['bilingual', 'translation'].includes(String(value.mode)));
+      || value.action === 'start' && typeof value.choiceId === 'string' && value.choiceId.length > 0
+      && ['bilingual', 'translation'].includes(String(value.mode)));
     case 'video.end': return typeof value.sessionId === 'string';
     case 'hover.command': return Number.isInteger(value.tabId) && typeof value.enabled === 'boolean';
     case 'selection.get': case 'selection.retry': case 'selection.close': return typeof value.id === 'string';

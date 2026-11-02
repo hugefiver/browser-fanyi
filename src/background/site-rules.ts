@@ -283,6 +283,11 @@ export class SiteRuleScheduler {
   }
 
   pauseOrRestore(tabId: number, documentId: string, reason: 'pause' | 'restore'): Promise<void> {
+    const current = this.#documents.get(tabId);
+    if (current?.documentId === documentId) {
+      current.suppressed = true;
+      current.pending = false;
+    }
     const generation = this.#invalidateTab(tabId);
     return this.#enqueue(async () => {
       if (!this.#isCurrentGeneration(tabId, generation)) return;
@@ -298,7 +303,11 @@ export class SiteRuleScheduler {
     const exactOrigin = normalizeSiteOrigin(origin);
     const affected = [...this.#documents.values()]
       .filter(document => document.origin === exactOrigin)
-      .map(document => ({ tabId: document.tabId, generation: this.#invalidateTab(document.tabId) }));
+      .map(document => {
+        document.suppressed = true;
+        document.pending = false;
+        return { tabId: document.tabId, generation: this.#invalidateTab(document.tabId) };
+      });
     return this.#enqueue(async () => {
       for (const { tabId, generation } of affected) {
         if (!this.#isCurrentGeneration(tabId, generation)) continue;
@@ -313,7 +322,11 @@ export class SiteRuleScheduler {
 
   stopAll(reason: 'settings-clear'): Promise<void> {
     const affected = [...this.#documents.values()]
-      .map(document => ({ tabId: document.tabId, generation: this.#invalidateTab(document.tabId) }));
+      .map(document => {
+        document.suppressed = true;
+        document.pending = false;
+        return { tabId: document.tabId, generation: this.#invalidateTab(document.tabId) };
+      });
     return this.#enqueue(async () => {
       for (const { tabId, generation } of affected) {
         if (!this.#isCurrentGeneration(tabId, generation)) continue;
