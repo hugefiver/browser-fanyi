@@ -201,10 +201,11 @@ describe('message and grant boundaries', () => {
       .toMatchObject({ ok: true, value: { prefix: '', model: '', hasKey: false, authorized: false } });
   });
 
-  it('installs the subtitle port and propagates permission and data invalidations', async () => {
+  it('installs independent subtitle and workbench ports and propagates permission and data invalidations', async () => {
     const ctx = await fixture();
-    expect(ctx.onConnect).toHaveBeenCalledTimes(1);
+    expect(ctx.onConnect).toHaveBeenCalledTimes(2);
     const contextChanged = vi.spyOn(ctx.controller.subtitles, 'contextChanged').mockResolvedValue();
+    const workbenchChanged = vi.spyOn(ctx.controller.workbench, 'contextChanged').mockResolvedValue();
 
     const removed = ctx.permissionsRemoved.mock.calls[0][0] as () => void;
     removed();
@@ -214,6 +215,7 @@ describe('message and grant boundaries', () => {
       source: 'source', target: '术语', targetLanguage: 'zh-CN',
     } }, ui('options'));
     expect(contextChanged).toHaveBeenCalledTimes(3);
+    expect(workbenchChanged).toHaveBeenCalledTimes(3);
   });
 
   it('loses grants on background restart instead of silently resending', async () => {

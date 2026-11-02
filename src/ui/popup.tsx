@@ -43,6 +43,7 @@ const phaseLabels: Record<PageStatus['phase'], string> = {
 
 export const PopupApp: React.FC = () => {
   const [tabId, setTabId] = useState<number | null>(null);
+  const [windowId, setWindowId] = useState<number | null>(null);
   const [tabUrl, setTabUrl] = useState<string>('');
   const [isUnsupportedTab, setIsUnsupportedTab] = useState<boolean>(false);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
@@ -60,6 +61,7 @@ export const PopupApp: React.FC = () => {
         return;
       }
       setTabId(active.id);
+      setWindowId(active.windowId ?? null);
       const url = active.url || '';
       setTabUrl(url);
       if (isUnsupportedTabUrl(url)) {
@@ -196,6 +198,35 @@ export const PopupApp: React.FC = () => {
     } catch {
       setActionError('无法打开 SRT 字幕翻译页面。');
     }
+  };
+
+  const openWorkbench = async () => {
+    setActionError(null);
+    try { await browser.tabs.create({ url: browser.runtime.getURL('workbench.html') }); }
+    catch { setActionError('无法打开工作台。'); }
+  };
+
+  const captureInput = async () => {
+    if (tabId === null) return;
+    setLoadingAction(true);
+    setActionError(null);
+    try {
+      const reply = await browser.runtime.sendMessage({ type: 'input.start', tabId }) as Reply<null>;
+      if (!reply.ok) setActionError(reply.error.message);
+    } catch { setActionError('无法捕获源字段，请聚焦普通网页中的输入框后再次打开工具栏。'); }
+    finally { setLoadingAction(false); }
+  };
+
+  const openSidebar = () => {
+    setActionError(null);
+    const native = globalThis as typeof globalThis & {
+      chrome?: { sidePanel?: { open: (options: { windowId: number }) => Promise<void> } };
+    };
+    let opened: Promise<void>;
+    if (native.chrome?.sidePanel?.open && windowId !== null) opened = native.chrome.sidePanel.open({ windowId });
+    else if (browser.sidebarAction?.open) opened = browser.sidebarAction.open();
+    else { setActionError('当前浏览器没有可用的原生侧栏能力，请使用工作台标签页。'); return; }
+    void opened.catch(() => setActionError('原生侧栏打开失败，请检查浏览器权限或使用工作台标签页。'));
   };
 
   const isConfigured = Boolean(
@@ -513,6 +544,13 @@ export const PopupApp: React.FC = () => {
         >
           SRT 字幕翻译（在新标签页打开）
         </Button>
+        <Button fullWidth variant="outlined" onClick={() => void openWorkbench()}>翻译与写作工作台</Button>
+        <Button fullWidth variant="outlined" onClick={openSidebar}>打开原生侧栏</Button>
+        <Button fullWidth variant="outlined" disabled={loadingAction || isUnsupportedTab || tabId === null}
+          onClick={() => void captureInput()}>捕获输入并打开工作台</Button>
+        <Typography variant="caption" color="text.secondary">
+          输入辅助先捕获当前聚焦字段，发送后仅预览；另行确认才写回。密码、验证码和支付字段不可用。
+        </Typography>
       </Stack>
     </Box>
   );

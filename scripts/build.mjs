@@ -26,6 +26,7 @@ for (const platform of ['chromium', 'firefox']) {
           options: resolve(root, 'options.html'),
           selection: resolve(root, 'selection.html'),
           subtitles: resolve(root, 'subtitles.html'),
+          workbench: resolve(root, 'workbench.html'),
         },
         onwarn(warning, warn) {
           if (warning.code === 'MODULE_LEVEL_DIRECTIVE' && warning.message.includes('"use client"')) return;
@@ -43,8 +44,10 @@ for (const platform of ['chromium', 'firefox']) {
     });
   }
   const manifest = platform === 'chromium'
-    ? { ...base, minimum_chrome_version: '120', background: { service_worker: 'background.js' } }
-    : { ...base, background: { scripts: ['background.js'], persistent: false }, browser_specific_settings: {
+    ? { ...base, permissions: [...base.permissions, 'sidePanel'], side_panel: { default_path: 'workbench.html?sidebar=1' },
+      minimum_chrome_version: '120', background: { service_worker: 'background.js' } }
+    : { ...base, sidebar_action: { default_title: '翻译与写作工作台', default_panel: 'workbench.html?sidebar=1', open_at_install: false },
+      background: { scripts: ['background.js'], persistent: false }, browser_specific_settings: {
       gecko: { id: 'web-reader@browser-fanyi.local', strict_min_version: '140.0',
         data_collection_permissions: { required: ['websiteContent', 'authenticationInfo'] } },
     } };

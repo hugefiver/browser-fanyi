@@ -27,6 +27,11 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'"
   },
+  "sidebar_action": {
+    "default_title": "翻译与写作工作台",
+    "default_panel": "workbench.html?sidebar=1",
+    "open_at_install": false
+  },
   "background": {
     "scripts": [
       "background.js"

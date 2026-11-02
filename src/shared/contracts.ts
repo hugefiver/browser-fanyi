@@ -30,6 +30,7 @@ export type UiRequest =
   | { type: 'page.status'; tabId: number }
   | { type: 'hover.command'; tabId: number; enabled: boolean }
   | { type: 'selection.start'; tabId: number }
+  | { type: 'input.start'; tabId: number }
   | { type: 'selection.get'; id: string }
   | { type: 'selection.retry'; id: string }
   | { type: 'selection.close'; id: string };

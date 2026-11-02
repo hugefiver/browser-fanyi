@@ -9,7 +9,8 @@ import { RequestPool, translate } from './provider';
 import { Selections } from './selections';
 import { SettingsStore, type StoredSettings, type TranslationSnapshot } from './settings';
 import { Subtitles } from './subtitles';
-import type { SubtitlesContext } from '../shared/subtitles';
+import { Workbench } from './workbench';
+import type { WorkbenchContext, WritingOperation } from '../shared/workbench';
 
 const interrupted: Failure = { code: 'interrupted', message: errorMessages.interrupted };
 const permission: Failure = { code: 'permission', message: errorMessages.permission };
@@ -18,6 +19,7 @@ export class BackgroundController {
   readonly pages: PageSessions;
   readonly selections: Selections;
   readonly subtitles: Subtitles;
+  readonly workbench: Workbench;
   private pool = new RequestPool();
   private controllers = new Set<AbortController>();
   private readonly contextBase = crypto.randomUUID();
@@ -29,7 +31,10 @@ export class BackgroundController {
     this.pages = new PageSessions(api);
     this.selections = new Selections(api, () => this.ready(), (settings, text, signal) => this.send(settings, text, signal));
     this.subtitles = new Subtitles(api, () => this.ready(),
-      (settings, text, signal) => this.send(settings, text, signal), () => this.subtitleContext());
+      (settings, text, signal) => this.send(settings, text, signal), () => this.context());
+    this.workbench = new Workbench(api, this.pages, () => this.ready(),
+      (settings, text, signal, operation) => this.send(settings, text, signal, operation === 'translate', operation),
+      () => this.context());
   }
 
   private async ready(): Promise<Reply<TranslationSnapshot>> {
@@ -43,7 +48,8 @@ export class BackgroundController {
     return { ok: true, value: settings };
   }
 
-  private async send(settings: StoredSettings, text: string, signal: AbortSignal, includeGlossary = true): Promise<Reply<string>> {
+  private async send(settings: StoredSettings, text: string, signal: AbortSignal, includeGlossary = true,
+    operation: WritingOperation = 'translate'): Promise<Reply<string>> {
     const matched = includeGlossary
       ? matchGlossary((settings as TranslationSnapshot).glossary, text, settings.targetLanguage)
       : { ok: true as const, value: [] };
@@ -54,7 +60,7 @@ export class BackgroundController {
     signal.addEventListener('abort', cancel, { once: true });
     this.controllers.add(controller);
     try {
-      return await this.pool.run(controller.signal, () => this.translator(settings, text, controller.signal, matched.value));
+      return await this.pool.run(controller.signal, () => this.translator(settings, text, controller.signal, matched.value, undefined, operation));
     } finally {
       signal.removeEventListener('abort', cancel);
       this.controllers.delete(controller);
@@ -77,7 +83,7 @@ export class BackgroundController {
     return this.store.publicSettings((origin) => this.api.permissions.contains({ origins: [origin] }));
   }
 
-  private async subtitleContext(): Promise<SubtitlesContext> {
+  private async context(): Promise<WorkbenchContext> {
     for (;;) {
       const revision = this.revision;
       const settings = await this.publicSettings();
@@ -91,6 +97,7 @@ export class BackgroundController {
     this.selections.invalidate();
     this.controllers.forEach((controller) => controller.abort());
     void this.subtitles.contextChanged();
+    void this.workbench.contextChanged();
   }
 
   async handle(message: unknown, sender: Runtime.MessageSender): Promise<unknown> {
@@ -196,6 +203,7 @@ export class BackgroundController {
           return selection.ok ? this.selections.start(selection.value) : selection;
         } catch { return fail('unsupported'); }
       }
+      case 'input.start': return this.workbench.capture(message.tabId);
       case 'selection.get': return this.selections.get(message.id, sender);
       case 'selection.retry': return this.selections.retry(message.id, sender);
       case 'selection.close': return this.selections.close(message.id, sender);
@@ -229,5 +237,6 @@ export class BackgroundController {
     };
     this.api.runtime.onInstalled.addListener(createMenu);
     this.api.runtime.onStartup.addListener(createMenu);
+    this.workbench.install();
   }
 }

@@ -40,7 +40,7 @@ export async function fixture() {
     permissions: { contains: vi.fn(async () => true), onRemoved: { addListener: permissionsRemoved } },
     tabs: { query: vi.fn(async () => [{ id: 1, url: pageUrl }]), get: vi.fn(async () => ({ id: 1, url: pageUrl })),
       sendMessage, create: vi.fn(async (_options: { url: string }) => ({ id: 22 })),
-      remove: vi.fn(async (_id: number) => undefined), onRemoved: { addListener: onRemoved } },
+      remove: vi.fn(async (_id: number) => undefined), onRemoved: { addListener: onRemoved }, onActivated: { addListener: vi.fn() } },
     scripting: { executeScript: vi.fn(async () => []) },
     webNavigation: { onCommitted: { addListener: onCommitted }, onHistoryStateUpdated: { addListener: onHistoryStateUpdated },
       onReferenceFragmentUpdated: { addListener: onReferenceFragmentUpdated } },
