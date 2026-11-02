@@ -27,6 +27,7 @@ import { md2Theme } from './theme';
 import { sourceLanguageOptions, targetLanguageOptions } from './languages';
 import { resolveDraftOrigin, shouldClearKeyInput, buildKeyAction } from './options-logic';
 import { GlossaryPanel } from './glossary';
+import { SiteRulesPanel } from './site-rules';
 
 export const OptionsApp: React.FC = () => {
   const [savedSettings, setSavedSettings] = useState<PublicSettings | null>(null);
@@ -446,6 +447,7 @@ export const OptionsApp: React.FC = () => {
       </Paper>
 
       <GlossaryPanel reloadKey={glossaryReloadKey} />
+      <Paper sx={{ p: 3, my: 3 }}><SiteRulesPanel settings={savedSettings} /></Paper>
 
       <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" sx={{ fontSize: '1.05rem', fontWeight: 600, mb: 2 }}>

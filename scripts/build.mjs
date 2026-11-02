@@ -9,7 +9,7 @@ const base = {
   version: '0.1.0',
   description: '主动翻译当前网页和选区，支持双语、仅译文与还原。',
   permissions: ['activeTab', 'scripting', 'storage', 'contextMenus', 'clipboardWrite', 'webNavigation'],
-  optional_host_permissions: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'],
+  optional_host_permissions: ['https://*/*', 'http://*/*'],
   action: { default_popup: 'popup.html', default_title: '网页译读' },
   options_ui: { page: 'options.html', open_in_tab: true },
   content_security_policy: { extension_pages: "script-src 'self'; object-src 'none'" },

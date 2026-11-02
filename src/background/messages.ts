@@ -22,7 +22,12 @@ function validGlossaryDraft(value: unknown, allowId: boolean): boolean {
 export function request(value: unknown): value is UiRequest | ContentRequest {
   if (!record(value)) return false;
   switch (value.type) {
-    case 'settings.get': case 'service.test': case 'glossary.list': return true;
+    case 'settings.get': case 'service.test': case 'glossary.list': case 'sites.list': return true;
+    case 'sites.save': return Number.isInteger(value.tabId) && record(value.rule)
+      && typeof value.rule.origin === 'string' && typeof value.rule.targetLanguage === 'string'
+      && ['bilingual', 'translation'].includes(String(value.rule.mode)) && value.rule.enabled === true
+      && record(value.rule.service) && typeof value.rule.service.prefix === 'string' && typeof value.rule.service.model === 'string';
+    case 'sites.change': return typeof value.origin === 'string' && ['enable', 'disable', 'remove'].includes(String(value.action));
     case 'settings.save': return validSettings(value.settings);
     case 'settings.clear': return typeof value.all === 'boolean';
     case 'glossary.upsert': return validGlossaryDraft(value.entry, true);
@@ -62,7 +67,7 @@ export function uiPage(sender: Runtime.MessageSender, extensionUrl: string, exte
 
 export function allowed(page: UiPage, type: UiRequest['type'] | ContentRequest['type']): boolean {
   if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test',
-    'glossary.list', 'glossary.upsert', 'glossary.delete', 'glossary.import'].includes(type);
-  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start'].includes(type);
+    'glossary.list', 'glossary.upsert', 'glossary.delete', 'glossary.import', 'sites.list', 'sites.change'].includes(type);
+  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start', 'sites.list', 'sites.save', 'sites.change'].includes(type);
   return ['selection.get', 'selection.retry', 'selection.close'].includes(type);
 }

@@ -1,6 +1,7 @@
 import { defaultPreferences, type GlossaryDraft, type GlossaryEntry, type PublicSettings, type SaveSettings } from '../shared/contracts';
 import { endpoint } from '../shared/endpoint';
 import { appendGlossary, deleteGlossary, upsertGlossary } from './glossary';
+import { applySettingsClearToSiteRules, reconcileSiteRulesForService, type SiteRule } from './site-rules';
 
 export interface StoredSettings {
   prefix: string;
@@ -101,6 +102,37 @@ export class SettingsStore {
     return this.changeGlossary((entries) => appendGlossary(entries, inputs));
   }
 
+  async listSiteRules(): Promise<SiteRule[]> {
+    const database = await this.open();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction('settings').objectStore('settings').get('siteRules');
+      request.onsuccess = () => resolve((request.result as SiteRule[] | undefined) ?? []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async changeSiteRules(change: (rules: SiteRule[], settings: StoredSettings) => SiteRule[]): Promise<SiteRule[]> {
+    const database = await this.open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction('settings', 'readwrite');
+      const store = transaction.objectStore('settings');
+      const settings = store.get(SETTINGS_KEY);
+      const rules = store.get('siteRules');
+      let next: SiteRule[] = [];
+      let cause: unknown;
+      rules.onsuccess = () => {
+        try {
+          next = change((rules.result as SiteRule[] | undefined) ?? [],
+            (settings.result as StoredSettings | undefined) ?? emptySettings());
+          store.put(next, 'siteRules');
+        } catch (error) { cause = error; transaction.abort(); }
+      };
+      transaction.oncomplete = () => resolve(next);
+      transaction.onerror = () => reject(cause ?? transaction.error);
+      transaction.onabort = () => reject(cause ?? transaction.error);
+    });
+  }
+
   async save(input: SaveSettings): Promise<void> {
     const next = endpoint(input.prefix);
     if (!input.model.trim() || !input.sourceLanguage.trim() || !input.targetLanguage.trim()) throw new Error('configuration');
@@ -117,6 +149,9 @@ export class SettingsStore {
         store.put({ prefix: next.prefix, model: input.model.trim(), sourceLanguage: input.sourceLanguage.trim(),
           targetLanguage: input.targetLanguage.trim(), mode: input.mode, key } satisfies StoredSettings, SETTINGS_KEY);
       };
+      const rules = store.get('siteRules');
+      rules.onsuccess = () => store.put(reconcileSiteRulesForService(
+        (rules.result as SiteRule[] | undefined) ?? [], { prefix: next.prefix, model: input.model.trim() }), 'siteRules');
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
@@ -128,6 +163,9 @@ export class SettingsStore {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction('settings', 'readwrite');
       const store = transaction.objectStore('settings');
+      const rules = store.get('siteRules');
+      rules.onsuccess = () => store.put(applySettingsClearToSiteRules(
+        (rules.result as SiteRule[] | undefined) ?? [], all), 'siteRules');
       if (all) {
         store.delete(SETTINGS_KEY);
         store.delete(GLOSSARY_KEY);

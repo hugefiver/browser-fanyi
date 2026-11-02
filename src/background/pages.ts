@@ -2,6 +2,7 @@ import type browser from '../shared/browser';
 import type { Runtime } from 'webextension-polyfill';
 import { errorMessages, fail, idleStatus, type ContentCommand, type Failure, type PageStatus, type Reply, type UiRequest } from '../shared/contracts';
 import type { StoredSettings } from './settings';
+import type { SiteTranslationStart } from './site-rules';
 
 interface Session {
   id: string;
@@ -10,6 +11,7 @@ interface Session {
   requests: number;
   sequence: number;
   controllers: Set<AbortController>;
+  auto?: SiteTranslationStart;
 }
 
 type PageRequest = Extract<UiRequest, { type: 'page.command' }>;
@@ -63,7 +65,7 @@ export class PageSessions {
   }
 
   async command(input: PageRequest, loadSettings?: () => Promise<Reply<StoredSettings>>,
-    current: () => boolean = () => true): Promise<Reply<PageStatus>> {
+    current: () => boolean = () => true, auto?: SiteTranslationStart): Promise<Reply<PageStatus>> {
     const active = this.sessions.get(input.tabId);
     if (loadSettings || (active?.kind !== 'hover' && ['pause', 'restore'].includes(input.action))) this.stop(input.tabId);
     const revision = this.version(input.tabId);
@@ -84,7 +86,11 @@ export class PageSessions {
       await this.inject(input.tabId);
       const tab = await this.api.tabs.get(input.tabId);
       if (!current() || this.revisions.get(input.tabId) !== revision || tab.url !== url) return fail('interrupted');
-      const session: Session = { id: crypto.randomUUID(), kind: 'page', url, requests: 0, sequence: 0, controllers: new Set() };
+      const session: Session = { id: crypto.randomUUID(), kind: 'page', url, requests: 0, sequence: 0, controllers: new Set(), auto };
+      if (auto) auto.signal.addEventListener('abort', () => {
+        if (this.sessions.get(input.tabId) === session) this.invalidate(input.tabId,
+          { code: 'interrupted', message: errorMessages.interrupted });
+      }, { once: true });
       this.sessions.set(input.tabId, session);
       const preferences = { sourceLanguage: settings.sourceLanguage, targetLanguage: settings.targetLanguage,
         mode: input.mode ?? settings.mode };

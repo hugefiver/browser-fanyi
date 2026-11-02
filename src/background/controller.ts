@@ -11,6 +11,8 @@ import { SettingsStore, type StoredSettings, type TranslationSnapshot } from './
 import { Subtitles } from './subtitles';
 import { Workbench } from './workbench';
 import type { WorkbenchContext, WritingOperation } from '../shared/workbench';
+import { SiteRuleScheduler, createSiteRule, deleteSiteRule, mayReleaseSitePermission, sameSiteService,
+  setSiteRuleEnabled, siteOriginFromUrl, sitePermissionPattern, upsertSiteRule } from './site-rules';
 
 const interrupted: Failure = { code: 'interrupted', message: errorMessages.interrupted };
 const permission: Failure = { code: 'permission', message: errorMessages.permission };
@@ -20,6 +22,8 @@ export class BackgroundController {
   readonly selections: Selections;
   readonly subtitles: Subtitles;
   readonly workbench: Workbench;
+  readonly sites: SiteRuleScheduler;
+  private documents = new Map<number, string>();
   private pool = new RequestPool();
   private controllers = new Set<AbortController>();
   private readonly contextBase = crypto.randomUUID();
@@ -29,6 +33,25 @@ export class BackgroundController {
   constructor(private readonly api: typeof browser, private readonly store = new SettingsStore(),
     private readonly translator = translate) {
     this.pages = new PageSessions(api);
+    this.sites = new SiteRuleScheduler({
+      load: () => this.store.listSiteRules(),
+      disableRule: async (origin) => { await this.store.changeSiteRules(rules => setSiteRuleEnabled(rules, origin, false)); },
+      authorize: (_origin, permission) => api.permissions.contains({ origins: [permission] }),
+      currentSettings: async () => { const settings = await this.ready(); return settings.ok ? settings.value : null; },
+      start: async (request) => {
+        const revision = this.revision;
+        const current = () => !request.signal.aborted && revision === this.revision && !this.updating;
+        if (!current()) return;
+        await this.pages.command({ type: 'page.command', tabId: request.tabId, action: 'start', mode: request.mode },
+          async () => {
+            if (!current()) return fail('interrupted');
+            const loaded = await this.ready();
+            if (!current()) return fail('interrupted');
+            return loaded.ok ? { ok: true, value: { ...loaded.value, targetLanguage: request.targetLanguage } } : loaded;
+          }, current, request);
+      },
+      stop: async ({ tabId }) => this.pages.invalidate(tabId, interrupted),
+    });
     this.selections = new Selections(api, () => this.ready(), (settings, text, signal) => this.send(settings, text, signal));
     this.subtitles = new Subtitles(api, () => this.ready(),
       (settings, text, signal) => this.send(settings, text, signal), () => this.context());
@@ -93,6 +116,7 @@ export class BackgroundController {
 
   invalidate(error: Failure): void {
     this.revision++;
+    void this.sites.stopAll('settings-clear');
     this.pages.invalidateAll(error);
     this.selections.invalidate();
     this.controllers.forEach((controller) => controller.abort());
@@ -131,10 +155,13 @@ export class BackgroundController {
     if (!settings.ok) return settings;
     if (!this.pages.valid(authorized.tabId, authorized.session)) return fail('interrupted');
     if (authorized.session.requests >= 100) return fail('limit');
+    const auto = authorized.session.auto;
+    if (auto && (auto.signal.aborted || !sameSiteService(auto.service, settings.value))) return fail('interrupted');
+    if (auto && !auto.budget.take()) return fail('limit');
     authorized.session.requests++;
     const controller = new AbortController();
     authorized.session.controllers.add(controller);
-    try { return await this.send(settings.value, text, controller.signal); }
+    try { return await this.send(auto ? { ...settings.value, targetLanguage: auto.targetLanguage } : settings.value, text, controller.signal); }
     finally { authorized.session.controllers.delete(controller); }
   }
 
@@ -166,6 +193,40 @@ export class BackgroundController {
         await this.store.clear(message.all);
         return this.publicSettings();
       });
+      case 'sites.list': return { ok: true, value: await this.store.listSiteRules() };
+      case 'sites.save': {
+        const url = await this.pages.activeTab(message.tabId);
+        const settings = await this.ready();
+        if (!url || !settings.ok) return fail('permission');
+        const rule = createSiteRule({ tabUrl: url, targetLanguage: message.rule.targetLanguage,
+          mode: message.rule.mode, service: message.rule.service });
+        if (rule.origin !== message.rule.origin || !sameSiteService(rule.service, settings.value)
+          || !await this.api.permissions.contains({ origins: [sitePermissionPattern(rule.origin)] })) return fail('permission');
+        await this.sites.stopOrigin(rule.origin, 'rule-disabled');
+        return { ok: true, value: await this.store.changeSiteRules((rules, current) => {
+          if (!sameSiteService(current, rule.service)) throw new Error('configuration');
+          return upsertSiteRule(rules, rule);
+        }) };
+      }
+      case 'sites.change': {
+        const origin = siteOriginFromUrl(message.origin);
+        await this.sites.stopOrigin(origin, message.action === 'remove' ? 'rule-removed' : 'rule-disabled');
+        if (message.action === 'enable' && !await this.api.permissions.contains({ origins: [sitePermissionPattern(origin)] })) return fail('permission');
+        const rules = await this.store.changeSiteRules((rules, settings) => {
+          if (message.action === 'remove') return deleteSiteRule(rules, origin);
+          const rule = rules.find(rule => rule.origin === origin);
+          if (message.action === 'enable' && (!rule || !settings.prefix || !sameSiteService(rule.service, settings))) throw new Error('configuration');
+          return setSiteRuleEnabled(rules, origin, message.action === 'enable');
+        });
+        if (message.action === 'remove') {
+          const settings = await this.store.read();
+          if (mayReleaseSitePermission({ origin, remainingRules: rules,
+            currentService: settings.prefix ? settings : null, otherFeatureOrigins: [] })) {
+            await this.api.permissions.remove({ origins: [sitePermissionPattern(origin)] });
+          }
+        }
+        return { ok: true, value: rules };
+      }
       case 'glossary.list': return { ok: true, value: await this.store.listGlossary() };
       case 'glossary.upsert': return this.mutate(() => this.store.upsertGlossary(message.entry));
       case 'glossary.delete': return this.mutate(() => this.store.deleteGlossary(message.id));
@@ -180,6 +241,10 @@ export class BackgroundController {
         return this.pages.status(message.tabId);
       }
       case 'page.command': {
+        const documentId = this.documents.get(message.tabId);
+        if (documentId && (message.action === 'pause' || message.action === 'restore')) {
+          await this.sites.pauseOrRestore(message.tabId, documentId, message.action);
+        }
         if (['pause', 'restore', 'mode'].includes(message.action)) return this.pages.command(message);
         const revision = this.revision;
         return this.pages.command(message, () => this.ready(), () => this.revision === revision && !this.updating);
@@ -214,13 +279,36 @@ export class BackgroundController {
     this.subtitles.install();
     this.api.runtime.onMessage.addListener((message: unknown, sender: Runtime.MessageSender) => this.handle(message, sender));
     this.api.permissions.onRemoved.addListener(() => this.invalidate(permission));
-    const navigate = (details: { tabId: number; frameId: number }) => {
-      if (details.frameId === 0) this.pages.invalidate(details.tabId, interrupted);
+    const visible = async () => {
+      const [tab] = await this.api.tabs.query({ active: true, lastFocusedWindow: true });
+      const window = tab?.windowId === undefined ? undefined : await this.api.windows.get(tab.windowId);
+      await this.sites.visibleTabChanged(window?.focused === false ? null : tab?.id ?? null);
     };
-    this.api.webNavigation.onCommitted.addListener(navigate);
-    this.api.webNavigation.onHistoryStateUpdated.addListener(navigate);
-    this.api.webNavigation.onReferenceFragmentUpdated.addListener(navigate);
+    const navigate = (details: { tabId: number; frameId: number; url?: string }, sameDocument: boolean) => {
+      if (details.frameId !== 0) return;
+      this.pages.invalidate(details.tabId, interrupted);
+      const documentId = sameDocument ? this.documents.get(details.tabId) : crypto.randomUUID();
+      if (!documentId) return;
+      this.documents.set(details.tabId, documentId);
+      if (!details.url || !/^https?:\/\//.test(details.url)) {
+        void this.sites.tabClosed(details.tabId);
+        return;
+      }
+      // Invalidate a pending start before waiting for browser tab/window state.
+      const stopped = sameDocument
+        ? this.sites.sameDocumentNavigated({ ...details, documentId, url: details.url })
+        : this.sites.documentCommitted({ ...details, documentId, url: details.url });
+      void stopped.then(visible).catch(() => undefined);
+    };
+    this.api.webNavigation.onCommitted.addListener(details => navigate(details, false));
+    this.api.webNavigation.onHistoryStateUpdated.addListener(details => navigate(details, true));
+    this.api.webNavigation.onReferenceFragmentUpdated.addListener(details => navigate(details, true));
+    this.api.tabs.onActivated.addListener(() => { void this.sites.visibleTabChanged(null).then(visible); });
+    this.api.windows.onFocusChanged.addListener(() => { void this.sites.visibleTabChanged(null).then(visible); });
+    void visible();
     this.api.tabs.onRemoved.addListener((tabId) => {
+      this.documents.delete(tabId);
+      void this.sites.tabClosed(tabId);
       void this.pages.removed(tabId).catch(() => undefined);
       this.selections.removed(tabId);
     });

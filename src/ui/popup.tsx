@@ -29,6 +29,7 @@ import {
 import { md2Theme } from './theme';
 import { getLanguageLabel } from './languages';
 import { isUnsupportedTabUrl } from './tab-utils';
+import { SiteRulesPanel } from './site-rules';
 
 const phaseLabels: Record<PageStatus['phase'], string> = {
   idle: '未翻译',
@@ -544,6 +545,7 @@ export const PopupApp: React.FC = () => {
         >
           SRT 字幕翻译（在新标签页打开）
         </Button>
+        <SiteRulesPanel settings={settings} tab={tabId !== null && !isUnsupportedTab ? { id: tabId, url: tabUrl } : undefined} />
         <Button fullWidth variant="outlined" onClick={() => void openWorkbench()}>翻译与写作工作台</Button>
         <Button fullWidth variant="outlined" onClick={openSidebar}>打开原生侧栏</Button>
         <Button fullWidth variant="outlined" disabled={loadingAction || isUnsupportedTab || tabId === null}

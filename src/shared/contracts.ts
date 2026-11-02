@@ -22,6 +22,9 @@ export type UiRequest =
   | { type: 'settings.save'; settings: SaveSettings }
   | { type: 'settings.clear'; all: boolean }
   | { type: 'service.test' }
+  | { type: 'sites.list' }
+  | { type: 'sites.save'; tabId: number; rule: import('../background/site-rules').SiteRule }
+  | { type: 'sites.change'; origin: string; action: 'enable' | 'disable' | 'remove' }
   | { type: 'glossary.list' }
   | { type: 'glossary.upsert'; entry: GlossaryDraft & { id?: string } }
   | { type: 'glossary.delete'; id: string }
