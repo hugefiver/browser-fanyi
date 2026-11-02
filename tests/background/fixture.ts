@@ -6,6 +6,7 @@ import { BackgroundController } from '../../src/background/controller';
 import { SettingsStore } from '../../src/background/settings';
 import { translate } from '../../src/background/provider';
 import { defaultPreferences, idleStatus, type ContentCommand, type Grant, type PageStatus, type Reply } from '../../src/shared/contracts';
+import type { VideoCommand, VideoInfo } from '../../src/shared/video';
 
 export const pageUrl = 'https://page.example/article';
 export const ui = (page: string): Runtime.MessageSender => ({ id: 'clean-room', url: `chrome-extension://clean-room/${page}.html` });
@@ -14,7 +15,10 @@ export const tab = (id: number): Tabs.Tab => ({ id, index: 0, highlighted: true,
 export const content = (): Runtime.MessageSender => ({ id: 'clean-room', frameId: 0, tab: tab(1), url: pageUrl });
 
 export async function fixture() {
-  const sendMessage = vi.fn(async (_id: number, message: ContentCommand): Promise<Reply<PageStatus> | Reply<string>> => {
+  const sendMessage = vi.fn(async (_id: number, message: ContentCommand | VideoCommand): Promise<Reply<PageStatus> | Reply<string> | VideoInfo> => {
+    if (message.type === 'video.inspect' || message.type === 'video.control') return { videos: [], state: {
+      phase: 'active', mode: 'bilingual', requestsUsed: 0, requestsRemaining: 100, canContinue: false, cues: [],
+    } };
     if (message.type === 'content.selection') return { ok: true, value: 'Only selected text' };
     return { ok: true, value: { ...idleStatus(), phase: 'running' } };
   });
@@ -57,6 +61,7 @@ export async function fixture() {
     const commands = sendMessage.mock.calls.map(([, command]) => command).reverse();
     for (const command of commands) {
       if ((command.type === 'content.command' || command.type === 'hover.command') && command.grant) return command.grant;
+      if (command.type === 'video.control' && command.action === 'start') return command.grant;
     }
     throw new Error('No issued grant');
   };

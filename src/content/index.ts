@@ -5,6 +5,8 @@ import { createContentEngine } from './engine';
 import { InputAssist } from './input-assist';
 import { inputCommand } from '../shared/workbench';
 import { CaptureRegion, capturePageSnapshot } from './capture-region';
+import { VideoSubtitles } from './video-subtitles';
+import { videoCommand } from '../shared/video';
 
 function isCommand(message: unknown): message is ContentCommand {
   if (typeof message !== 'object' || message === null || !('type' in message)) return false;
@@ -19,9 +21,44 @@ if (window.top === window && !host.__browserFanyiContent) {
   const inputAssist = new InputAssist(document);
   const region = new CaptureRegion(document);
   const captureInstance = crypto.randomUUID();
-  window.addEventListener('pagehide', () => { inputAssist.invalidate(); region.cancel(); });
+  let videoSession: string | undefined;
+  let videoSequence = 0;
+  const video = new VideoSubtitles(document, state => {
+    if (state.videoIndex === undefined && videoSession) {
+      void browser.runtime.sendMessage({ type: 'video.end', sessionId: videoSession }).catch(() => undefined);
+      videoSession = undefined;
+    }
+  });
+  const videoInfo = () => ({ videos: video.list(), state: video.getState() });
+  window.addEventListener('pagehide', () => { inputAssist.invalidate(); region.cancel(); video.stop(); });
   browser.runtime.onMessage.addListener((message: unknown, sender: Runtime.MessageSender) => {
     if (sender.id !== browser.runtime.id) return undefined;
+    if (videoCommand(message)) {
+      if (sender.tab || ![browser.runtime.getURL('background.js'), browser.runtime.getURL('_generated_background_page.html')].includes(sender.url ?? '')) return undefined;
+      if (message.type === 'video.control') {
+        if (message.action === 'stop') video.stop();
+        else if (message.action === 'continue') video.continue();
+        else if (message.action === 'start') {
+          video.stop();
+          const sessionId = message.grant.sessionId;
+          videoSequence = 0;
+          const state = video.start({ videoIndex: message.videoIndex, trackIndex: message.trackIndex,
+            mode: message.grant.preferences.mode, translate: async (text, signal) => {
+              if (signal.aborted) throw new Error('字幕翻译已取消。');
+              const sequence = ++videoSequence;
+              const cancel = () => { void browser.runtime.sendMessage({ type: 'video.cancel', sessionId, sequence: ++videoSequence }).catch(() => undefined); };
+              signal.addEventListener('abort', cancel, { once: true });
+              try {
+                const reply = await browser.runtime.sendMessage({ type: 'video.translate', sessionId, sequence, text }) as Reply<string>;
+                if (!reply.ok) throw new Error(reply.error.message);
+                return reply.value;
+              } finally { signal.removeEventListener('abort', cancel); }
+            } });
+          if (state.phase === 'active' || state.phase === 'limit') videoSession = sessionId;
+        }
+      }
+      return Promise.resolve(videoInfo());
+    }
     if (message && typeof message === 'object' && 'type' in message
       && ['capture.select', 'capture.inspect', 'capture.cancel'].includes(String(message.type))) {
       if (sender.tab || ![browser.runtime.getURL('background.js'), browser.runtime.getURL('_generated_background_page.html')].includes(sender.url ?? '')) return undefined;
@@ -40,7 +77,9 @@ if (window.top === window && !host.__browserFanyiContent) {
       return Promise.resolve({ ok: true, value: null });
     }
     if (!isCommand(message)) return undefined;
-    if (message.type === 'content.invalidate') { inputAssist.invalidate(); region.cancel(); }
+    if (message.type === 'content.invalidate') { inputAssist.invalidate(); region.cancel(); video.stop(); }
+    if (message.type === 'content.command' && ['start', 'restore'].includes(message.action)
+      || message.type === 'hover.command' && message.enabled) video.stop();
     return engine.handle(message);
   });
 }

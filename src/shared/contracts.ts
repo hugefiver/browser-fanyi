@@ -35,6 +35,9 @@ export type UiRequest =
   | { type: 'selection.start'; tabId: number }
   | { type: 'input.start'; tabId: number }
   | { type: 'capture.start'; tabId: number }
+  | { type: 'video.list'; tabId: number }
+  | { type: 'video.command'; tabId: number; action: 'start'; videoIndex: number; trackIndex: number; mode: DisplayMode }
+  | { type: 'video.command'; tabId: number; action: 'stop' | 'continue' }
   | { type: 'selection.get'; id: string }
   | { type: 'selection.retry'; id: string }
   | { type: 'selection.close'; id: string };
@@ -42,7 +45,10 @@ export type ContentRequest =
   | { type: 'content.translate'; sessionId: string; text: string }
   | { type: 'content.cancel'; sessionId: string }
   | { type: 'hover.translate'; sessionId: string; sequence: number; text: string }
-  | { type: 'hover.cancel'; sessionId: string; sequence: number };
+  | { type: 'hover.cancel'; sessionId: string; sequence: number }
+  | { type: 'video.translate'; sessionId: string; sequence: number; text: string }
+  | { type: 'video.cancel'; sessionId: string; sequence: number }
+  | { type: 'video.end'; sessionId: string };
 export type ContentCommand =
   | { type: 'content.command'; action: PageAction; grant?: Grant; mode?: DisplayMode }
   | { type: 'hover.command'; enabled: boolean; grant?: Grant }

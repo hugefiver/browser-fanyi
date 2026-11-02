@@ -39,13 +39,18 @@ export function request(value: unknown): value is UiRequest | ContentRequest {
       && ['start', 'pause', 'resume', 'retry', 'restore', 'mode'].includes(String(value.action))
       && (value.mode === undefined || value.mode === 'bilingual' || value.mode === 'translation')
       && (value.action !== 'mode' || value.mode !== undefined);
+    case 'video.list': return Number.isInteger(value.tabId);
+    case 'video.command': return Number.isInteger(value.tabId) && (value.action === 'stop' || value.action === 'continue'
+      || value.action === 'start' && Number.isInteger(value.videoIndex) && Number.isInteger(value.trackIndex)
+      && Number(value.videoIndex) >= 0 && Number(value.trackIndex) >= 0 && ['bilingual', 'translation'].includes(String(value.mode)));
+    case 'video.end': return typeof value.sessionId === 'string';
     case 'hover.command': return Number.isInteger(value.tabId) && typeof value.enabled === 'boolean';
     case 'selection.get': case 'selection.retry': case 'selection.close': return typeof value.id === 'string';
     case 'content.translate': return typeof value.sessionId === 'string' && typeof value.text === 'string';
     case 'content.cancel': return typeof value.sessionId === 'string';
-    case 'hover.translate': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
+    case 'video.translate': case 'hover.translate': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
       && Number.isSafeInteger(value.sequence) && value.sequence > 0 && typeof value.text === 'string';
-    case 'hover.cancel': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
+    case 'video.cancel': case 'hover.cancel': return typeof value.sessionId === 'string' && typeof value.sequence === 'number'
       && Number.isSafeInteger(value.sequence) && value.sequence > 0;
     default: return false;
   }
@@ -68,6 +73,6 @@ export function uiPage(sender: Runtime.MessageSender, extensionUrl: string, exte
 export function allowed(page: UiPage, type: UiRequest['type'] | ContentRequest['type']): boolean {
   if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test',
     'glossary.list', 'glossary.upsert', 'glossary.delete', 'glossary.import', 'sites.list', 'sites.change'].includes(type);
-  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start', 'capture.start', 'sites.list', 'sites.save', 'sites.change'].includes(type);
+  if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start', 'input.start', 'capture.start', 'video.list', 'video.command', 'sites.list', 'sites.save', 'sites.change'].includes(type);
   return ['selection.get', 'selection.retry', 'selection.close'].includes(type);
 }

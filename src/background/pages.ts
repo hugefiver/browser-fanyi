@@ -6,7 +6,7 @@ import type { SiteTranslationStart } from './site-rules';
 
 interface Session {
   id: string;
-  kind: 'page' | 'hover';
+  kind: 'page' | 'hover' | 'video';
   url: string;
   requests: number;
   sequence: number;
@@ -145,6 +145,37 @@ export class PageSessions {
     }
   }
 
+  async video(input: Extract<UiRequest, { type: 'video.list' | 'video.command' }>,
+    loadSettings: () => Promise<Reply<StoredSettings>>, current: () => boolean): Promise<Reply<import('../shared/video').VideoInfo>> {
+    if (input.type === 'video.command' && input.action === 'start') this.invalidate(input.tabId,
+      { code: 'interrupted', message: errorMessages.interrupted });
+    const version = this.version(input.tabId);
+    const url = await this.activeTab(input.tabId);
+    if (!url) return fail('unsupported');
+    try {
+      await this.inject(input.tabId);
+      if (!current() || this.version(input.tabId) !== version || (await this.api.tabs.get(input.tabId)).url !== url) return fail('interrupted');
+      if (input.type === 'video.list') return { ok: true, value: await this.api.tabs.sendMessage(input.tabId, { type: 'video.inspect' }, { frameId: 0 }) };
+      if (input.action !== 'start') {
+        const session = this.sessions.get(input.tabId);
+        if (session?.kind === 'video') {
+          if (input.action === 'stop') this.stop(input.tabId);
+          else session.requests = 0;
+        } else if (input.action === 'continue') return fail('interrupted');
+        return { ok: true, value: await this.api.tabs.sendMessage(input.tabId, { type: 'video.control', action: input.action }, { frameId: 0 }) };
+      }
+      const settings = await loadSettings();
+      if (!settings.ok) return settings;
+      if (!current() || this.version(input.tabId) !== version || (await this.api.tabs.get(input.tabId)).url !== url) return fail('interrupted');
+      const session: Session = { id: crypto.randomUUID(), kind: 'video', url, requests: 0, sequence: 0, controllers: new Set() };
+      this.sessions.set(input.tabId, session);
+      const { sourceLanguage, targetLanguage } = settings.value;
+      return { ok: true, value: await this.api.tabs.sendMessage(input.tabId, { type: 'video.control', action: 'start',
+        videoIndex: input.videoIndex, trackIndex: input.trackIndex,
+        grant: { sessionId: session.id, preferences: { sourceLanguage, targetLanguage, mode: input.mode } } }, { frameId: 0 }) };
+    } catch { return fail('unsupported'); }
+  }
+
   version(tabId: number): number { return this.revisions.get(tabId) ?? 0; }
 
   authorize(sender: Runtime.MessageSender, id: string, kind: Session['kind']): { tabId: number; session: Session } | undefined {
@@ -157,14 +188,14 @@ export class PageSessions {
   }
 
   advance(session: Session, sequence: number): boolean {
-    if (session.kind !== 'hover' || sequence <= session.sequence) return false;
+    if (session.kind === 'page' || sequence <= session.sequence) return false;
     session.sequence = sequence;
     session.controllers.forEach((controller) => controller.abort());
     return true;
   }
 
   current(session: Session, sequence: number): boolean {
-    return session.kind === 'hover' && session.sequence === sequence;
+    return session.kind !== 'page' && session.sequence === sequence;
   }
 
   valid(tabId: number, session: Session): boolean { return this.sessions.get(tabId) === session; }

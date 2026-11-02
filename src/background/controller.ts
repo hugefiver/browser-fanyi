@@ -181,6 +181,18 @@ export class BackgroundController {
         }
         return this.translatePage(authorized, message.text);
       }
+      if (message.type === 'video.end') {
+        const authorized = this.pages.authorize(sender, message.sessionId, 'video');
+        if (!authorized) return fail('interrupted');
+        this.pages.stop(authorized.tabId);
+        return { ok: true, value: null };
+      }
+      if (message.type === 'video.translate' || message.type === 'video.cancel') {
+        const authorized = this.pages.authorize(sender, message.sessionId, 'video');
+        if (!authorized || !this.pages.advance(authorized.session, message.sequence)) return fail('interrupted');
+        if (message.type === 'video.cancel') return { ok: true, value: null };
+        return this.translateHover(authorized, message.text, message.sequence);
+      }
       if (message.type === 'hover.translate' || message.type === 'hover.cancel') {
         const authorized = this.pages.authorize(sender, message.sessionId, 'hover');
         if (!authorized || !this.pages.advance(authorized.session, message.sequence)) return fail('interrupted');
@@ -311,6 +323,10 @@ export class BackgroundController {
           if (revision !== this.revision || pageVersion !== this.pages.version(message.tabId) || tab.url !== url) return fail('interrupted');
           return selection.ok ? this.selections.start(selection.value) : selection;
         } catch { return fail('unsupported'); }
+      }
+      case 'video.list': case 'video.command': {
+        const revision = this.revision;
+        return this.pages.video(message, () => this.ready(), () => revision === this.revision && !this.updating);
       }
       case 'input.start': return this.workbench.capture(message.tabId);
       case 'capture.start': return this.captureImage(message.tabId);

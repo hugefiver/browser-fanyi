@@ -30,6 +30,7 @@ import { md2Theme } from './theme';
 import { getLanguageLabel } from './languages';
 import { isUnsupportedTabUrl } from './tab-utils';
 import { SiteRulesPanel } from './site-rules';
+import { VideoPanel } from './video';
 
 const phaseLabels: Record<PageStatus['phase'], string> = {
   idle: '未翻译',
@@ -555,6 +556,7 @@ export const PopupApp: React.FC = () => {
           } catch { setActionError('区域截图失败，请重新打开工具栏重试。'); }
           finally { setLoadingAction(false); }
         }}>框选区域截图（本地预览）</Button>
+        <VideoPanel tabId={isUnsupportedTab ? null : tabId} settings={settings} />
         <SiteRulesPanel settings={settings} tab={tabId !== null && !isUnsupportedTab ? { id: tabId, url: tabUrl } : undefined} />
         <Button fullWidth variant="outlined" onClick={() => void openWorkbench()}>翻译与写作工作台</Button>
         <Button fullWidth variant="outlined" onClick={openSidebar}>打开原生侧栏</Button>

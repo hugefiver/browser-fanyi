@@ -1,0 +1,13 @@
+WEBVTT
+
+intro
+00:00.000 --> 00:02.000
+First cue <img src=x onerror=alert(1)>
+
+middle
+00:02.000 --> 00:04.000
+Second cue
+
+ending
+00:04.000 --> 00:06.000
+Final cue
