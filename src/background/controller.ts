@@ -2,11 +2,12 @@ import type browser from '../shared/browser';
 import type { Runtime } from 'webextension-polyfill';
 import { errorMessages, fail, type Failure, type PublicSettings, type Reply, type UiRequest } from '../shared/contracts';
 import { endpoint } from '../shared/endpoint';
+import { GlossaryError, matchGlossary } from './glossary';
 import { allowed, request, uiPage } from './messages';
 import { PageSessions } from './pages';
 import { RequestPool, translate } from './provider';
 import { Selections } from './selections';
-import { SettingsStore, type StoredSettings } from './settings';
+import { SettingsStore, type StoredSettings, type TranslationSnapshot } from './settings';
 
 const interrupted: Failure = { code: 'interrupted', message: errorMessages.interrupted };
 const permission: Failure = { code: 'permission', message: errorMessages.permission };
@@ -25,41 +26,49 @@ export class BackgroundController {
     this.selections = new Selections(api, () => this.ready(), (settings, text, signal) => this.send(settings, text, signal));
   }
 
-  private async ready(): Promise<Reply<StoredSettings>> {
+  private async ready(): Promise<Reply<TranslationSnapshot>> {
     await this.pages.initialized;
     const revision = this.revision;
     if (this.updating) return fail('interrupted');
-    const settings = await this.store.read();
+    const settings = await this.store.snapshot();
     if (!settings.prefix || !settings.model) return fail('configuration');
     if (!await this.api.permissions.contains({ origins: [endpoint(settings.prefix).permission] })) return fail('permission');
     if (this.updating || revision !== this.revision) return fail('interrupted');
     return { ok: true, value: settings };
   }
 
-  private async send(settings: StoredSettings, text: string, signal: AbortSignal): Promise<Reply<string>> {
+  private async send(settings: StoredSettings, text: string, signal: AbortSignal, includeGlossary = true): Promise<Reply<string>> {
+    const matched = includeGlossary
+      ? matchGlossary((settings as TranslationSnapshot).glossary, text, settings.targetLanguage)
+      : { ok: true as const, value: [] };
+    if (!matched.ok) return matched;
     const controller = new AbortController();
     const cancel = () => controller.abort();
     if (signal.aborted) return fail('interrupted');
     signal.addEventListener('abort', cancel, { once: true });
     this.controllers.add(controller);
     try {
-      return await this.pool.run(controller.signal, () => this.translator(settings, text, controller.signal));
+      return await this.pool.run(controller.signal, () => this.translator(settings, text, controller.signal, matched.value));
     } finally {
       signal.removeEventListener('abort', cancel);
       this.controllers.delete(controller);
     }
   }
 
-  private async mutate(operation: () => Promise<void>): Promise<Reply<PublicSettings>> {
+  private async mutate<T>(operation: () => Promise<T>): Promise<Reply<T>> {
     this.updating++;
     this.invalidate(interrupted);
     try {
-      await operation();
-      return { ok: true, value: await this.store.publicSettings(
-        (origin) => this.api.permissions.contains({ origins: [origin] })) };
-    }
-    catch { return fail('configuration'); }
-    finally { this.updating--; this.invalidate(interrupted); }
+      return { ok: true, value: await operation() };
+    } catch (error) {
+      return error instanceof GlossaryError
+        ? { ok: false, error: { code: 'glossary', message: error.message } }
+        : fail('configuration');
+    } finally { this.updating--; this.invalidate(interrupted); }
+  }
+
+  private publicSettings(): Promise<PublicSettings> {
+    return this.store.publicSettings((origin) => this.api.permissions.contains({ origins: [origin] }));
   }
 
   invalidate(error: Failure): void {
@@ -126,14 +135,23 @@ export class BackgroundController {
 
   private async ui(message: UiRequest, sender: Runtime.MessageSender): Promise<unknown> {
     switch (message.type) {
-      case 'settings.get': return { ok: true, value: await this.store.publicSettings(
-        (origin) => this.api.permissions.contains({ origins: [origin] })) };
-      case 'settings.save': return this.mutate(() => this.store.save(message.settings));
-      case 'settings.clear': return this.mutate(() => this.store.clear(message.all));
+      case 'settings.get': return { ok: true, value: await this.publicSettings() };
+      case 'settings.save': return this.mutate(async () => {
+        await this.store.save(message.settings);
+        return this.publicSettings();
+      });
+      case 'settings.clear': return this.mutate(async () => {
+        await this.store.clear(message.all);
+        return this.publicSettings();
+      });
+      case 'glossary.list': return { ok: true, value: await this.store.listGlossary() };
+      case 'glossary.upsert': return this.mutate(() => this.store.upsertGlossary(message.entry));
+      case 'glossary.delete': return this.mutate(() => this.store.deleteGlossary(message.id));
+      case 'glossary.import': return this.mutate(() => this.store.importGlossary(message.entries));
       case 'service.test': {
         const settings = await this.ready();
         if (!settings.ok) return settings;
-        return this.send(settings.value, 'Hello.', new AbortController().signal);
+        return this.send(settings.value, 'Hello.', new AbortController().signal, false);
       }
       case 'page.status': {
         if (!await this.pages.activeTab(message.tabId)) return fail('unsupported');

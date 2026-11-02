@@ -13,12 +13,22 @@ function validSettings(value: unknown): value is SaveSettings {
     || value.key.kind === 'replace' && typeof value.key.value === 'string' && typeof value.key.forOrigin === 'string';
 }
 
+function validGlossaryDraft(value: unknown, allowId: boolean): boolean {
+  return record(value) && typeof value.source === 'string' && typeof value.target === 'string'
+    && typeof value.targetLanguage === 'string'
+    && (allowId ? value.id === undefined || typeof value.id === 'string' : value.id === undefined);
+}
+
 export function request(value: unknown): value is UiRequest | ContentRequest {
   if (!record(value)) return false;
   switch (value.type) {
-    case 'settings.get': case 'service.test': return true;
+    case 'settings.get': case 'service.test': case 'glossary.list': return true;
     case 'settings.save': return validSettings(value.settings);
     case 'settings.clear': return typeof value.all === 'boolean';
+    case 'glossary.upsert': return validGlossaryDraft(value.entry, true);
+    case 'glossary.delete': return typeof value.id === 'string';
+    case 'glossary.import': return Array.isArray(value.entries) && value.entries.length > 0
+      && value.entries.length <= 200 && value.entries.every((entry) => validGlossaryDraft(entry, false));
     case 'page.status': case 'selection.start': return Number.isInteger(value.tabId);
     case 'page.command': return Number.isInteger(value.tabId)
       && ['start', 'pause', 'resume', 'retry', 'restore', 'mode'].includes(String(value.action))
@@ -51,7 +61,8 @@ export function uiPage(sender: Runtime.MessageSender, extensionUrl: string, exte
 }
 
 export function allowed(page: UiPage, type: UiRequest['type'] | ContentRequest['type']): boolean {
-  if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test'].includes(type);
+  if (page === 'options') return ['settings.get', 'settings.save', 'settings.clear', 'service.test',
+    'glossary.list', 'glossary.upsert', 'glossary.delete', 'glossary.import'].includes(type);
   if (page === 'popup') return ['settings.get', 'page.command', 'page.status', 'hover.command', 'selection.start'].includes(type);
   return ['selection.get', 'selection.retry', 'selection.close'].includes(type);
 }

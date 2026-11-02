@@ -26,6 +26,7 @@ import { endpoint } from '../shared/endpoint';
 import { md2Theme } from './theme';
 import { sourceLanguageOptions, targetLanguageOptions } from './languages';
 import { resolveDraftOrigin, shouldClearKeyInput, buildKeyAction } from './options-logic';
+import { GlossaryPanel } from './glossary';
 
 export const OptionsApp: React.FC = () => {
   const [savedSettings, setSavedSettings] = useState<PublicSettings | null>(null);
@@ -45,6 +46,7 @@ export const OptionsApp: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [authorizing, setAuthorizing] = useState<boolean>(false);
   const [testing, setTesting] = useState<boolean>(false);
+  const [glossaryReloadKey, setGlossaryReloadKey] = useState(0);
 
   const prevDraftOriginRef = useRef<string | null>(null);
 
@@ -234,6 +236,7 @@ export const OptionsApp: React.FC = () => {
         setMode(res.value.mode);
         setApiKey('');
         prevDraftOriginRef.current = resolveDraftOrigin(res.value.prefix);
+        if (all) setGlossaryReloadKey((value) => value + 1);
         setStatusMessage({
           severity: 'success',
           text: all ? '已清除全部数据与偏好设置。' : '已清除服务地址、模型与密钥配置。',
@@ -441,6 +444,8 @@ export const OptionsApp: React.FC = () => {
           </Box>
         </Stack>
       </Paper>
+
+      <GlossaryPanel reloadKey={glossaryReloadKey} />
 
       <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" sx={{ fontSize: '1.05rem', fontWeight: 600, mb: 2 }}>

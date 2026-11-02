@@ -14,6 +14,10 @@ describe('message and grant boundaries', () => {
       { ...ui('options'), id: 'other-extension' }, { ...ui('options'), frameId: 2 }, ui('popup'), content(),
     ]) expect(await ctx.controller.handle({ type: 'service.test' }, sender)).toEqual(fail('permission'));
     expect(await ctx.controller.handle({ type: 'settings.clear', all: true }, ui('popup'))).toEqual(fail('permission'));
+    expect(await ctx.controller.handle({ type: 'glossary.list' }, ui('popup'))).toEqual(fail('permission'));
+    expect(await ctx.controller.handle({ type: 'glossary.upsert', entry: {
+      source: 'private', target: '私有', targetLanguage: 'zh-CN',
+    } }, content())).toEqual(fail('permission'));
     expect(await ctx.controller.handle({ type: 'page.command', tabId: 1, action: 'start' }, ui('options'))).toEqual(fail('permission'));
     expect(ctx.translator).not.toHaveBeenCalled();
     const settings = await ctx.controller.handle({ type: 'settings.get' }, ui('popup'));
@@ -33,6 +37,25 @@ describe('message and grant boundaries', () => {
     expect(await ctx.controller.handle(message, content())).toEqual({ ok: true, value: 'translated' });
     expect(ctx.api.scripting.executeScript).toHaveBeenCalledWith({ target: { tabId: 1, frameIds: [0] }, files: ['content.js'] });
     expect(ctx.translator).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends only matching current-language terms and keeps them within the existing request budget', async () => {
+    const ctx = await fixture();
+    await ctx.controller.handle({ type: 'glossary.import', entries: [
+      { source: 'source', target: '来源', targetLanguage: 'zh-CN' },
+      { source: 'PRIVATE_UNRELATED', target: '不应发送', targetLanguage: 'zh-CN' },
+      { source: 'source', target: 'source-fr', targetLanguage: 'fr' },
+    ] }, ui('options'));
+    const listed = await ctx.controller.handle({ type: 'glossary.list' }, ui('options'));
+    expect(listed).toMatchObject({ ok: true, value: expect.arrayContaining([
+      expect.objectContaining({ source: 'PRIVATE_UNRELATED' }),
+    ]) });
+    const grant = await ctx.start();
+    expect(await ctx.controller.handle({ type: 'content.translate', sessionId: grant.sessionId, text: 'source only' }, content()))
+      .toEqual({ ok: true, value: 'translated' });
+    expect(ctx.translator).toHaveBeenCalledTimes(1);
+    expect(ctx.translator.mock.calls[0][3]).toEqual([{ source: 'source', target: '来源' }]);
+    expect(ctx.translator.mock.calls[0][1]).toBe('source only');
   });
 
   it('accepts a fresh SPA grant with an old sender document URL only when the current tab URL matches', async () => {
@@ -145,6 +168,25 @@ describe('message and grant boundaries', () => {
     expect(await ctx.controller.handle({ type: 'service.test' }, ui('options'))).toEqual(fail('configuration'));
   });
 
+  it('glossary mutations cancel in-flight translations and invalidate the old grant', async () => {
+    const ctx = await fixture();
+    const grant = await ctx.start();
+    let began!: () => void;
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    ctx.translator.mockImplementation((_settings, _text, signal) => new Promise<Reply<string>>((resolve) => {
+      signal.addEventListener('abort', () => resolve(fail('interrupted')), { once: true });
+      began();
+    }));
+    const request = ctx.controller.handle({ type: 'content.translate', sessionId: grant.sessionId, text: 'source' }, content());
+    await started;
+    expect(await ctx.controller.handle({ type: 'glossary.upsert', entry: {
+      source: 'source', target: '术语', targetLanguage: 'zh-CN',
+    } }, ui('options'))).toMatchObject({ ok: true, value: [expect.objectContaining({ source: 'source' })] });
+    expect(await request).toEqual(fail('interrupted'));
+    expect(await ctx.controller.handle({ type: 'content.translate', sessionId: grant.sessionId, text: 'source' }, content()))
+      .toEqual(fail('interrupted'));
+  });
+
   it('returns public settings after save/clear and invalidates paused page results', async () => {
     const ctx = await fixture();
     await ctx.start();
@@ -168,12 +210,14 @@ describe('message and grant boundaries', () => {
     expect(ctx.translator).not.toHaveBeenCalled();
   });
 
-  it('connection testing checks authorization and sends a fixed small string only', async () => {
+  it('connection testing checks authorization and sends a fixed small string without glossary data', async () => {
     const ctx = await fixture();
+    await ctx.store.upsertGlossary({ source: 'Hello.', target: '你好。', targetLanguage: 'zh-CN' });
     ctx.api.permissions.contains.mockResolvedValueOnce(false);
     expect(await ctx.controller.handle({ type: 'service.test' }, ui('options'))).toEqual(fail('permission'));
     expect(ctx.translator).not.toHaveBeenCalled();
     await ctx.controller.handle({ type: 'service.test' }, ui('options'));
     expect(ctx.translator.mock.calls[0][1]).toBe('Hello.');
+    expect(ctx.translator.mock.calls[0][3]).toEqual([]);
   });
 });

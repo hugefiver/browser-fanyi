@@ -1,10 +1,13 @@
 export type DisplayMode = 'bilingual' | 'translation';
-export type ErrorCode = 'configuration' | 'permission' | 'authentication' | 'quota' | 'rate-limit' | 'network' | 'timeout' | 'invalid-response' | 'interrupted' | 'unsupported' | 'limit';
+export type ErrorCode = 'configuration' | 'permission' | 'authentication' | 'quota' | 'rate-limit' | 'network' | 'timeout' | 'invalid-response' | 'interrupted' | 'unsupported' | 'limit' | 'glossary';
 export interface Failure { code: ErrorCode; message: string }
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: Failure };
 export interface Preferences { sourceLanguage: string; targetLanguage: string; mode: DisplayMode }
 export interface PublicSettings extends Preferences { prefix: string; model: string; hasKey: boolean; authorized: boolean }
 export interface SaveSettings extends Preferences { prefix: string; model: string; key: { kind: 'keep' | 'clear' } | { kind: 'replace'; value: string; forOrigin: string } }
+export interface GlossaryDraft { source: string; target: string; targetLanguage: string }
+export interface GlossaryEntry extends GlossaryDraft { id: string }
+export interface GlossaryMapping { source: string; target: string }
 export const defaultPreferences: Preferences = { sourceLanguage: 'auto', targetLanguage: 'zh-CN', mode: 'bilingual' };
 export type PagePhase = 'idle' | 'running' | 'complete' | 'paused' | 'partial' | 'interrupted' | 'empty' | 'limit';
 export interface PageStatus {
@@ -19,6 +22,10 @@ export type UiRequest =
   | { type: 'settings.save'; settings: SaveSettings }
   | { type: 'settings.clear'; all: boolean }
   | { type: 'service.test' }
+  | { type: 'glossary.list' }
+  | { type: 'glossary.upsert'; entry: GlossaryDraft & { id?: string } }
+  | { type: 'glossary.delete'; id: string }
+  | { type: 'glossary.import'; entries: GlossaryDraft[] }
   | { type: 'page.command'; tabId: number; action: PageAction; mode?: DisplayMode }
   | { type: 'page.status'; tabId: number }
   | { type: 'hover.command'; tabId: number; enabled: boolean }
@@ -43,5 +50,6 @@ export const errorMessages: Record<ErrorCode, string> = {
   'rate-limit': '服务限流，请稍后主动重试。', network: '无法连接服务，请检查网络和地址。',
   timeout: '服务请求超时，可主动重试。', 'invalid-response': '服务未返回完整有效的文本译文。',
   interrupted: '操作已中断，请主动重新开始。', unsupported: '无法访问此页面，请使用普通网页。', limit: '已达到本次发送限制，请缩小范围或主动继续。',
+  glossary: '术语数据无效，请检查后重试。',
 };
 export const fail = (code: ErrorCode): Reply<never> => ({ ok: false, error: { code, message: errorMessages[code] } });

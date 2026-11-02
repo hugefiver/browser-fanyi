@@ -54,11 +54,37 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   await nativeButton('允许');
   await options.getByText('已授权', { exact: true }).waitFor({ timeout: 15000 });
   assert.equal(service.requests.length, 0);
+
+  await options.getByLabel('原词', { exact: true }).fill('Hello test world.');
+  await options.getByLabel('译词', { exact: true }).fill('首选测试世界');
+  await options.getByRole('button', { name: '添加术语', exact: true }).click();
+  await options.getByText('术语已添加。', { exact: true }).waitFor();
+  await options.getByRole('button', { name: '编辑', exact: true }).click();
+  await options.getByLabel('译词', { exact: true }).fill('首选测试文本');
+  await options.getByRole('button', { name: '保存术语修改', exact: true }).click();
+  await options.getByText('术语已更新。', { exact: true }).waitFor();
+  await options.getByLabel('原词', { exact: true }).fill('PRIVATE_UNRELATED');
+  await options.getByLabel('译词', { exact: true }).fill('不得外发');
+  await options.getByRole('button', { name: '添加术语', exact: true }).click();
+  await options.getByText('术语已添加。', { exact: true }).waitFor();
+  const importJson = JSON.stringify({ version: 1, entries: [
+    { source: 'Dynamic arrival.', target: '动态到达术语', targetLanguage: 'zh-CN' },
+  ] });
+  await options.getByLabel('导入术语 JSON').setInputFiles({ name: 'glossary.json', mimeType: 'application/json', buffer: Buffer.from(importJson) });
+  await options.getByRole('button', { name: '确认导入 1 项', exact: true }).click();
+  await options.getByText('已原子追加 1 项术语。', { exact: true }).waitFor();
+  assert.equal(service.requests.length, 0);
+  await options.reload();
+  await options.getByText('Hello test world.', { exact: true }).waitFor();
+  await options.getByText('PRIVATE_UNRELATED', { exact: true }).waitFor();
+  await options.getByText('Dynamic arrival.', { exact: true }).waitFor();
+
   await options.getByRole('button', { name: '测试服务连接', exact: true }).click();
   await options.waitForFunction(() => !document.body.textContent.includes('正在测试...'));
   assert.equal(service.requests.length, 1);
   assert.equal(service.requests[0].text, 'Hello.');
-  console.log('PASS: local save, host authorization, controlled connection test');
+  assert.equal(service.requests[0].body.messages[0].content.includes('"glossary"'), false);
+  console.log('PASS: local settings/glossary CRUD and atomic import persist; connection test omits glossary');
   const page = await context.newPage();
   await context.addCookies([{ name: 'CONTROLLED_COOKIE', value: 'must-not-send', url: service.url }]);
   await page.goto(`${service.url.replace('127.0.0.1', 'localhost')}/fixture`);
@@ -99,6 +125,12 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   await until(async () => (await status()).value?.phase === 'complete');
   console.log('PASS: browser action grants activeTab; extension message starts page translation');
   const count = service.requests.length;
+  const matchedGlossaryRequest = service.requests.find(item => item.text === 'Hello test world.');
+  assert(matchedGlossaryRequest);
+  assert(matchedGlossaryRequest.body.messages[0].content.includes(JSON.stringify({ glossary: [
+    { source: 'Hello test world.', target: '首选测试文本' },
+  ] })));
+  assert.equal(matchedGlossaryRequest.body.messages[0].content.includes('PRIVATE_UNRELATED'), false);
   assert(service.requests.every(item => !/PRIVATE_|<script|fixture/.test(item.text)));
   assert(service.requests.every(item => item.cookie === undefined && item.referer === undefined));
   await command('mode', 'translation');
@@ -111,6 +143,8 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   await page.locator('#draft').fill('NEW_PRIVATE_DRAFT');
   await page.evaluate(() => addText('Dynamic arrival.'));
   await until(async () => (await status()).value?.phase === 'complete' && service.requests.some(item => item.text === 'Dynamic arrival.'));
+  const importedGlossaryRequest = service.requests.find(item => item.text === 'Dynamic arrival.');
+  assert(importedGlossaryRequest.body.messages[0].content.includes('动态到达术语'));
   await page.evaluate(() => { firstNode.data = 'Website latest text.'; });
   await until(async () => (await page.locator('#first [data-browser-fanyi]').textContent()) === '译文：Website latest text.');
   console.log('PASS: privacy exclusions, modes without new requests, events/input, dynamic additions/updates');
@@ -141,6 +175,30 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   assert.equal(await page.locator('#draft').inputValue(), 'NEW_PRIVATE_DRAFT');
   assert(await page.evaluate(() => firstNode === document.querySelector('#first').firstChild && counterNode === document.querySelector('#counter')));
   console.log('PASS: pause/resume ignores late output; retry only failures; lossless restoration');
+
+  await options.bringToFront();
+  await options.getByRole('button', { name: '删除', exact: true }).nth(1).click();
+  await options.getByText('术语已删除。', { exact: true }).waitFor();
+  await options.reload();
+  await options.getByText('Hello test world.', { exact: true }).waitFor();
+  assert.equal(await options.getByText('PRIVATE_UNRELATED', { exact: true }).count(), 0);
+  await page.bringToFront();
+  service.control.delay = 700;
+  await command('start');
+  await until(async () => (await status()).value?.phase === 'complete');
+  await page.evaluate(() => { const node = addText('Glossary mutation delay.'); node.id = 'glossary-mutation'; });
+  await until(() => service.requests.some(item => item.text === 'Glossary mutation delay.'));
+  await options.bringToFront();
+  await options.getByRole('button', { name: '编辑', exact: true }).first().click();
+  await options.getByLabel('译词', { exact: true }).fill('最终首选文本');
+  await options.getByRole('button', { name: '保存术语修改', exact: true }).click();
+  await options.getByText('术语已更新。', { exact: true }).waitFor();
+  await page.bringToFront();
+  await new Promise(done => setTimeout(done, 900));
+  assert.equal(await page.locator('#glossary-mutation [data-browser-fanyi]').count(), 0);
+  assert.equal((await status()).value.phase, 'interrupted');
+  service.control.delay = 0;
+  console.log('PASS: glossary delete persists; glossary edit cancels in-flight work and invalidates old page results');
 
   const beforeHover = service.requests.length;
   assert.equal((await hoverCommand(true)).hoverEnabled, true);
@@ -246,9 +304,11 @@ async function runChecks({ context, cdp, id, base, options, service }) {
   assert.equal(denied.error.code, 'permission');
   await options.getByRole('button', { name: '清除全部数据（恢复初始状态）', exact: true }).click();
   const cleared = await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.get' }));
+  const clearedGlossary = await options.evaluate(() => chrome.runtime.sendMessage({ type: 'glossary.list' }));
   assert.equal(cleared.value.prefix, '');
   assert.equal(cleared.value.hasKey, false);
-  console.log('PASS: revocation stops new sends; all local settings/credentials cleared');
+  assert.deepEqual(clearedGlossary.value, []);
+  console.log('PASS: revocation stops new sends; all local settings, credentials, and glossary entries cleared');
 }
 
 async function until(check, timeout = 12000) {
