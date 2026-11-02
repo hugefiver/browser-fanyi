@@ -34,14 +34,20 @@ try {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'blue'; ctx.fillRect(0, 0, 160, 90);
     const stream = canvas.captureStream(0);
+    const videoTrack = stream.getVideoTracks()[0];
     const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
     const chunks = []; recorder.ondataavailable = event => chunks.push(event.data);
+    const started = new Promise(resolve => { recorder.addEventListener('start', resolve, { once: true }); });
     const done = new Promise(resolve => { recorder.onstop = resolve; });
-    recorder.start();
+    recorder.start(); await started;
     let frame = 0;
-    const timer = setInterval(() => { ctx.fillStyle = frame++ % 2 ? 'blue' : 'green'; ctx.fillRect(0, 0, 160, 90); stream.getVideoTracks()[0].requestFrame(); }, 40);
-    await new Promise(resolve => setTimeout(resolve, 2400)); recorder.stop(); await done;
-    clearInterval(timer); stream.getTracks().forEach(track => track.stop());
+    for (; frame < 60; frame += 1) {
+      ctx.fillStyle = frame % 2 ? 'blue' : 'green'; ctx.fillRect(0, 0, 160, 90);
+      videoTrack.requestFrame();
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    recorder.stop(); await done;
+    stream.getTracks().forEach(track => track.stop());
     const video = document.createElement('video'); video.id = 'media'; video.controls = true; video.muted = true;
     const event = name => new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Media fixture ${name}: ready=${video.readyState}, duration=${video.duration}, time=${video.currentTime}, error=${video.error?.code}, bytes=${chunks.reduce((sum, blob) => sum + blob.size, 0)}, frames=${frame}, mime=${recorder.mimeType}`)), 5000);
