@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Package browser builds
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          zip -qr "browser-fanyi-${VERSION}-chromium.zip" dist/chromium
+          zip -qr "browser-fanyi-${VERSION}-firefox.zip" dist/firefox
+      - name: Create prerelease (master push)
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}-pre.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --generate-notes \
+            browser-fanyi-"${VERSION}"-chromium.zip browser-fanyi-"${VERSION}"-firefox.zip
+      - name: Create release (tag push)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            browser-fanyi-*.zip
